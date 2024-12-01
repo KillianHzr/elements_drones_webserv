@@ -231,6 +231,50 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
     }
 ))
 
+// Route controlData (iPhone vers Mac)
+serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
+    routeName: "controlData",
+    textCode: { session, receivedText in
+        print("Données de contrôle reçues de l'iPhone : \(receivedText)")
+        if let rpiSession = serverWS.rpiSession {
+            rpiSession.writeText(receivedText)
+            print("Données de contrôle transmises au Raspberry Pi")
+        } else {
+            print("Session Raspberry Pi non disponible")
+        }
+    },
+    dataCode: { session, receivedData in
+        print("Données de contrôle reçues en format binaire")
+    },
+    connectedCode: { session in
+        print("Client iPhone connecté à la route controlData")
+    },
+    disconnectedCode: { session in
+        print("Client iPhone déconnecté de la route controlData")
+    }
+))
+
+// Route rpiConnect (Raspberry Pi vers Mac)
+serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
+    routeName: "rpiConnect",
+    textCode: { session, receivedText in
+        print("Message du Raspberry Pi : \(receivedText)")
+    },
+    dataCode: { session, receivedData in
+        print("Données reçues du Raspberry Pi")
+    },
+    connectedCode: { session in
+        serverWS.rpiSession = session
+        print("Session avec le Raspberry Pi établie")
+    },
+    disconnectedCode: { session in
+        if serverWS.rpiSession === session {
+            serverWS.rpiSession = nil
+            print("Session avec le Raspberry Pi fermée")
+        }
+    }
+))
+
 serverWS.start()
 
 RunLoop.main.run()
