@@ -85,10 +85,10 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
 serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
     routeName: "cursorData",
     textCode: { session, receivedText in
-        print("Données de curseur reçues : \(receivedText)")
+//        print("Données de curseur reçues : \(receivedText)")
         if let windowsSession = serverWS.windowsSession {
             windowsSession.writeText(receivedText)
-            print("Cursor data transmitted to Windows")
+//            print("Cursor data transmitted to Windows")
         }
     },
     dataCode: { session, receivedData in
@@ -205,6 +205,31 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(routeName: "imagePromptingT
     }
 }, dataCode: { session, receivedData in
 }))
+
+// Route sendImage
+serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
+    routeName: "sendImage",
+    textCode: { session, receivedText in
+        print("sendImage received text: \(receivedText)")
+    },
+    dataCode: { session, receivedData in
+        print("sendImage received image data: \(receivedData.count) bytes")
+        // Sauvegarder temporairement l'image
+        let tempImagePath = TmpFileManager.instance.saveImageDataArray(dataImageArray: [receivedData]).first
+        if let imagePath = tempImagePath {
+            // Envoyer l'email avec l'image en pièce jointe
+            WebSockerServer.instance.sendEmail(with: imagePath)
+        } else {
+            print("Erreur : Impossible de sauvegarder l'image reçue.")
+        }
+    },
+    connectedCode: { session in
+        print("sendImage connected")
+    },
+    disconnectedCode: { session in
+        print("sendImage disconnected")
+    }
+))
 
 serverWS.start()
 

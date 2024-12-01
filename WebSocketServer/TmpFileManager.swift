@@ -14,25 +14,23 @@ class TmpFileManager {
     private var currentPathArray = [String]()
     
     private func deleteCurrentPathArray() {
-        
-//        Suppress tmp files
-        
+        // Supprimer les fichiers temporaires si nécessaire
         self.currentPathArray = []
     }
     
-    func saveImageDataArray(dataImageArray:[Data]) -> [String]{
+    func saveImageDataArray(dataImageArray: [Data]) -> [String] {
         self.deleteCurrentPathArray()
         var savedImagePath = [String]()
         dataImageArray.enumerated().forEach { (index, element) in
-            var currentImageName = "tmp_\(index).png"
+            let currentImageName = "tmp_\(index).png"
             if FileHandler.saveImage(from: element, to: currentImageName) {
                 self.currentPathArray.append(currentImageName)
-            }else{
-                print("Error saving images.")
+                savedImagePath.append(currentImageName)
+            } else {
+                print("Erreur lors de la sauvegarde des images.")
             }
         }
         
         return self.currentPathArray
     }
-    
 }

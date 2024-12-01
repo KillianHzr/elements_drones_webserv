@@ -52,4 +52,42 @@ class WebSockerServer {
             print("Server failed to start: \(error.localizedDescription)")
         }
     }
+    
+    /// Fonction pour envoyer un email avec une image en pièce jointe
+    func sendEmail(with imagePath: String) {
+        // Obtenir le chemin absolu de l'image
+        let fullPath = getDocumentsDirectory().appendingPathComponent(imagePath).path
+        
+        let script = """
+        tell application "Mail"
+            set newMessage to make new outgoing message with properties {subject:"Dessin Validé", content:"Voici le dessin validé.", visible:true}
+            tell newMessage
+                make new to recipient at end of to recipients with properties {address:"killianherzer@gmail.com"}
+                make new attachment with properties {file name:(POSIX file "\(fullPath)")} at after the last paragraph
+            end tell
+            send newMessage
+        end tell
+        """
+        
+        let process = Process()
+        process.launchPath = "/usr/bin/osascript"
+        process.arguments = ["-e", script]
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            if process.terminationStatus == 0 {
+                print("Email envoyé avec succès avec l'image \(fullPath).")
+            } else {
+                print("Erreur lors de l'envoi de l'email.")
+            }
+        } catch {
+            print("Erreur lors de l'exécution du script AppleScript : \(error)")
+        }
+    }
+
+    
+    func getDocumentsDirectory() -> URL {
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
 }
