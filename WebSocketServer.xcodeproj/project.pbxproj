@@ -37,6 +37,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		ED1C013E2CFD14A500FA407B /* Save_RPI */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Save_RPI; sourceTree = "<group>"; };
 		EDA13E1F2CC8F6FD009D54B9 /* Model */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Model; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
@@ -71,6 +72,7 @@
 		611C4AD92CC7C4F300351126 /* WebSocketServer */ = {
 			isa = PBXGroup;
 			children = (
+				ED1C013E2CFD14A500FA407B /* Save_RPI */,
 				EDA13E1F2CC8F6FD009D54B9 /* Model */,
 				611C4ADA2CC7C4F300351126 /* main.swift */,
 				611C4B052CC7E7F300351126 /* TerminalCommandExecutor.swift */,
@@ -97,6 +99,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
+				ED1C013E2CFD14A500FA407B /* Save_RPI */,
 				EDA13E1F2CC8F6FD009D54B9 /* Model */,
 			);
 			name = WebSocketServer;
