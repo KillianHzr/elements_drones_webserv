@@ -38,6 +38,7 @@
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		ED1C013E2CFD14A500FA407B /* Save_RPI */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Save_RPI; sourceTree = "<group>"; };
+		ED2FF2332CFF63C600C16930 /* public */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = public; sourceTree = "<group>"; };
 		EDA13E1F2CC8F6FD009D54B9 /* Model */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Model; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
@@ -72,6 +73,7 @@
 		611C4AD92CC7C4F300351126 /* WebSocketServer */ = {
 			isa = PBXGroup;
 			children = (
+				ED2FF2332CFF63C600C16930 /* public */,
 				ED1C013E2CFD14A500FA407B /* Save_RPI */,
 				EDA13E1F2CC8F6FD009D54B9 /* Model */,
 				611C4ADA2CC7C4F300351126 /* main.swift */,
@@ -100,6 +102,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				ED1C013E2CFD14A500FA407B /* Save_RPI */,
+				ED2FF2332CFF63C600C16930 /* public */,
 				EDA13E1F2CC8F6FD009D54B9 /* Model */,
 			);
 			name = WebSocketServer;

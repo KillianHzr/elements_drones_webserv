@@ -6,7 +6,7 @@ import json
 from sphero_sdk import SpheroRvrObserver, RawMotorModesEnum
 
 # Adresse IP et port du Mac
-MAC_IP = '192.168.1.24'
+MAC_IP = '192.168.134.92'
 MAC_PORT = 8080
 ROUTE = 'rpiConnect'
 

@@ -7,32 +7,43 @@
 
 import Foundation
 import Combine
-import Swifter
 
 var serverWS = WebSockerServer()
 var cmd = TerminalCommandExecutor()
 var cancellable: AnyCancellable? = nil
 
-// Configuration des routes
+// Configuration of routes
 
 // Route rpiConnect
 serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
     routeName: "rpiConnect",
     textCode: { session, receivedText in
-        serverWS.rpiSession = session
-        print("RPI Connecté")
+        if receivedText == "pong" {
+            if let client = serverWS.rpiClient, client.session === session {
+                serverWS.rpiClient?.lastPongTime = Date()
+                print("Received pong from RPi")
+            }
+        } else {
+            // Handle other messages
+            print("RPI received text message: \(receivedText)")
+        }
     },
     dataCode: { session, receivedData in
         print("RPI received data: \(receivedData)")
     },
     connectedCode: { session in
-        serverWS.rpiSession = session
-        print("RPI connected and session set")
+        let clientSession = ClientSession(session: session)
+        serverWS.rpiClient = clientSession
+        serverWS.connectedDevices["RPi"] = true
+        serverWS.sendStatusUpdate()
+        print("RPi connected and session set")
     },
     disconnectedCode: { session in
-        if serverWS.rpiSession === session {
-            serverWS.rpiSession = nil
-            print("RPI disconnected and session cleared")
+        if serverWS.rpiClient?.session === session {
+            serverWS.rpiClient = nil
+            serverWS.connectedDevices["RPi"] = false
+            serverWS.sendStatusUpdate()
+            print("RPi disconnected and session cleared")
         }
     }
 ))
@@ -41,20 +52,31 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
 serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
     routeName: "iPhoneConnect",
     textCode: { session, receivedText in
-        // Gérer les messages textes si nécessaire
-        print("iPhone received text message: \(receivedText)")
+        if receivedText == "pong" {
+            if let client = serverWS.iPhoneClient, client.session === session {
+                serverWS.iPhoneClient?.lastPongTime = Date()
+                print("Received pong from iPhone")
+            }
+        } else {
+            // Handle other messages
+            print("iPhone received text message: \(receivedText)")
+        }
     },
     dataCode: { session, receivedData in
-        // Gérer les messages binaires si nécessaire
         print("iPhone received data message: \(receivedData.count) bytes")
     },
     connectedCode: { session in
-        serverWS.iPhoneSession = session
+        let clientSession = ClientSession(session: session)
+        serverWS.iPhoneClient = clientSession
+        serverWS.connectedDevices["iPhone"] = true
+        serverWS.sendStatusUpdate()
         print("iPhone connected and session set")
     },
     disconnectedCode: { session in
-        if serverWS.iPhoneSession === session {
-            serverWS.iPhoneSession = nil
+        if serverWS.iPhoneClient?.session === session {
+            serverWS.iPhoneClient = nil
+            serverWS.connectedDevices["iPhone"] = false
+            serverWS.sendStatusUpdate()
             print("iPhone disconnected and session cleared")
         }
     }
@@ -64,19 +86,34 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
 serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
     routeName: "windowsConnect",
     textCode: { session, receivedText in
-        print("Windows text message received: \(receivedText)")
+        if receivedText == "pong" {
+            if let client = serverWS.windowsClient, client.session === session {
+                serverWS.windowsClient?.lastPongTime = Date()
+                print("Received pong from Windows")
+            }
+        } else {
+            // Handle other messages
+            print("Windows text message received: \(receivedText)")
+        }
     },
     dataCode: { session, receivedData in
         print("Windows data message received")
     },
     connectedCode: { session in
-        serverWS.windowsSession = session
-        print("Windows connected and session set")
+        let clientSession = ClientSession(session: session)
+        serverWS.windowsClient = clientSession
+        serverWS.connectedDevices["Script cursor_control"] = true
+        serverWS.updateWindowsStatus()
+        serverWS.sendStatusUpdate()
+        print("Script cursor_control connected and session set")
     },
     disconnectedCode: { session in
-        if serverWS.windowsSession === session {
-            serverWS.windowsSession = nil
-            print("Windows disconnected and session cleared")
+        if serverWS.windowsClient?.session === session {
+            serverWS.windowsClient = nil
+            serverWS.connectedDevices["Script cursor_control"] = false
+            serverWS.updateWindowsStatus()
+            serverWS.sendStatusUpdate()
+            print("Script cursor_control disconnected and session cleared")
         }
     }
 ))
@@ -85,21 +122,18 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
 serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
     routeName: "cursorData",
     textCode: { session, receivedText in
-//        print("Données de curseur reçues : \(receivedText)")
-        if let windowsSession = serverWS.windowsSession {
+        // Forward cursor data to Windows client
+        if let windowsSession = serverWS.windowsClient?.session {
             windowsSession.writeText(receivedText)
-//            print("Cursor data transmitted to Windows")
         }
     },
     dataCode: { session, receivedData in
-        print("Données de curseur reçues")
+        print("Cursor data received")
     },
     connectedCode: { session in
-        // Optionnel : Suivi de la session cursorData si nécessaire
         print("cursorData connected")
     },
     disconnectedCode: { session in
-        // Optionnel : Gestion de la déconnexion cursorData si nécessaire
         print("cursorData disconnected")
     }
 ))
@@ -108,103 +142,139 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
 serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
     routeName: "videoFeed",
     textCode: { session, receivedText in
-        if let iphoneSession = serverWS.iPhoneSession {
+        if let iphoneSession = serverWS.iPhoneClient?.session {
             iphoneSession.writeText(receivedText)
             print("Text data transmitted to iPhone via iPhoneSession")
         }
     },
     dataCode: { session, receivedData in
         print("Received video data from Windows, size: \(receivedData.count) bytes")
-        if let iphoneSession = serverWS.iPhoneSession {
-            // Convertir `Data` en `[UInt8]` pour `writeBinary`
+        if let iphoneSession = serverWS.iPhoneClient?.session {
             let binaryData = [UInt8](receivedData)
             iphoneSession.writeBinary(binaryData)
             print("Transmitted video data to iPhone")
         } else {
             print("iPhoneSession is nil, cannot transmit video data")
         }
-    }
-))	
-
-
-
-serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(routeName: "testRobot", textCode: { session, receivedText in
-    if let rpiSess = serverWS.rpiSession {
-        rpiSess.writeText("python3 drive.py")
-    } else {
-        print("RPI Non connecté")
-    }
-}, dataCode: { session, receivedData in
-    print(receivedData)
-}))
-
-
-serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(routeName: "moveRobot", textCode: { session, receivedText in
-    if let rpiSess = serverWS.rpiSession {
-        let components = receivedText.split(separator: " ")
-        let command = components.first ?? ""
-        
-        var speed: String?
-        for i in 0..<components.count {
-            if components[i] == "--speed", i + 1 < components.count {
-                speed = String(components[i + 1])
-                break
+    },
+    connectedCode: { session in
+            let clientSession = ClientSession(session: session)
+            serverWS.screenCaptureClient = clientSession
+            serverWS.connectedDevices["Script screen_capture"] = true
+            serverWS.updateWindowsStatus()
+            serverWS.sendStatusUpdate()
+            print("Script screen_capture connected and session set")
+        },
+        disconnectedCode: { session in
+            if serverWS.screenCaptureClient?.session === session {
+                serverWS.screenCaptureClient = nil
+                serverWS.connectedDevices["Script screen_capture"] = false
+                serverWS.updateWindowsStatus()
+                serverWS.sendStatusUpdate()
+                print("Script screen_capture disconnected and session cleared")
             }
         }
-        
-        print("Mouvement du robot \(command) avec vitesse \(speed ?? "non spécifiée")")
-        let commandToSend = "python3 \(command).py" + (speed != nil ? " --speed \(speed!)" : "")
-        rpiSess.writeText(commandToSend)
-        print("Mouvement du robot fini")
-    } else {
-        print("RPI Non connecté")
-    }
-}, dataCode: { session, receivedData in
-    print(receivedData)
-}))
+))
 
-
-serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(routeName: "say", textCode: { session, receivedText in
-    cmd.say(textToSay: receivedText)
-}, dataCode: { session, receivedData in
-    print(receivedData)
-}))
-
-serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(routeName: "imagePrompting", textCode: { session, receivedText in
-    if let jsonData = receivedText.data(using: .utf8),
-       let imagePrompting = try? JSONDecoder().decode(ImagePrompting.self, from: jsonData) {
-        let dataImageArray = imagePrompting.toDataArray()
-        let tmpImagesPath = TmpFileManager.instance.saveImageDataArray(dataImageArray: dataImageArray)
-        
-        if (tmpImagesPath.count == 1) {
-            cmd.imagePrompting(imagePath: tmpImagesPath[0], prompt: imagePrompting.prompt)
+// Route testRobot
+serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
+    routeName: "testRobot",
+    textCode: { session, receivedText in
+        if let rpiSession = serverWS.rpiClient?.session {
+            rpiSession.writeText("python3 drive.py")
         } else {
-            print("You are sending too much images.")
+            print("RPi not connected")
         }
+    },
+    dataCode: { session, receivedData in
+        print(receivedData)
     }
-}, dataCode: { session, receivedData in
-}))
+))
 
-serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(routeName: "imagePromptingToText", textCode: { session, receivedText in
-    
-    cancellable?.cancel()
-    cancellable = cmd.$output.sink { newValue in
-        session.writeText(newValue)
-    }
-    
-    if let jsonData = receivedText.data(using: .utf8),
-       let imagePrompting = try? JSONDecoder().decode(ImagePrompting.self, from: jsonData) {
-        let dataImageArray = imagePrompting.toDataArray()
-        let tmpImagesPath = TmpFileManager.instance.saveImageDataArray(dataImageArray: dataImageArray)
-        
-        if (tmpImagesPath.count == 1) {
-            cmd.imagePrompting(imagePath: tmpImagesPath[0], prompt: imagePrompting.prompt)
+// Route moveRobot
+serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
+    routeName: "moveRobot",
+    textCode: { session, receivedText in
+        if let rpiSession = serverWS.rpiClient?.session {
+            let components = receivedText.split(separator: " ")
+            let command = components.first ?? ""
+            
+            var speed: String?
+            for i in 0..<components.count {
+                if components[i] == "--speed", i + 1 < components.count {
+                    speed = String(components[i + 1])
+                    break
+                }
+            }
+            
+            print("Moving robot \(command) with speed \(speed ?? "not specified")")
+            let commandToSend = "python3 \(command).py" + (speed != nil ? " --speed \(speed!)" : "")
+            rpiSession.writeText(commandToSend)
+            print("Robot movement finished")
         } else {
-            print("You are sending too much images.")
+            print("RPi not connected")
         }
+    },
+    dataCode: { session, receivedData in
+        print(receivedData)
     }
-}, dataCode: { session, receivedData in
-}))
+))
+
+// Route say
+serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
+    routeName: "say",
+    textCode: { session, receivedText in
+        cmd.say(textToSay: receivedText)
+    },
+    dataCode: { session, receivedData in
+        print(receivedData)
+    }
+))
+
+// Route imagePrompting
+serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
+    routeName: "imagePrompting",
+    textCode: { session, receivedText in
+        if let jsonData = receivedText.data(using: .utf8),
+           let imagePrompting = try? JSONDecoder().decode(ImagePrompting.self, from: jsonData) {
+            let dataImageArray = imagePrompting.toDataArray()
+            let tmpImagesPath = TmpFileManager.instance.saveImageDataArray(dataImageArray: dataImageArray)
+            
+            if tmpImagesPath.count == 1 {
+                cmd.imagePrompting(imagePath: tmpImagesPath[0], prompt: imagePrompting.prompt)
+            } else {
+                print("You are sending too many images.")
+            }
+        }
+    },
+    dataCode: { session, receivedData in
+    }
+))
+
+// Route imagePromptingToText
+serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
+    routeName: "imagePromptingToText",
+    textCode: { session, receivedText in
+        cancellable?.cancel()
+        cancellable = cmd.$output.sink { newValue in
+            session.writeText(newValue)
+        }
+        
+        if let jsonData = receivedText.data(using: .utf8),
+           let imagePrompting = try? JSONDecoder().decode(ImagePrompting.self, from: jsonData) {
+            let dataImageArray = imagePrompting.toDataArray()
+            let tmpImagesPath = TmpFileManager.instance.saveImageDataArray(dataImageArray: dataImageArray)
+            
+            if tmpImagesPath.count == 1 {
+                cmd.imagePrompting(imagePath: tmpImagesPath[0], prompt: imagePrompting.prompt)
+            } else {
+                print("You are sending too many images.")
+            }
+        }
+    },
+    dataCode: { session, receivedData in
+    }
+))
 
 // Route sendImage
 serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
@@ -214,13 +284,13 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
     },
     dataCode: { session, receivedData in
         print("sendImage received image data: \(receivedData.count) bytes")
-        // Sauvegarder temporairement l'image
+        // Temporarily save the image
         let tempImagePath = TmpFileManager.instance.saveImageDataArray(dataImageArray: [receivedData]).first
         if let imagePath = tempImagePath {
-            // Envoyer l'email avec l'image en pièce jointe
+            // Send the email with the image attachment
             WebSockerServer.instance.sendEmail(with: imagePath)
         } else {
-            print("Erreur : Impossible de sauvegarder l'image reçue.")
+            print("Error: Unable to save the received image.")
         }
     },
     connectedCode: { session in
@@ -231,51 +301,53 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
     }
 ))
 
-// Route controlData (iPhone vers Mac)
+// Route controlData (iPhone to Mac)
 serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
     routeName: "controlData",
     textCode: { session, receivedText in
-        print("Données de contrôle reçues de l'iPhone : \(receivedText)")
-        if let rpiSession = serverWS.rpiSession {
+        print("Control data received from iPhone: \(receivedText)")
+        if let rpiSession = serverWS.rpiClient?.session {
             rpiSession.writeText(receivedText)
-            print("Données de contrôle transmises au Raspberry Pi")
+            print("Control data transmitted to Raspberry Pi")
         } else {
-            print("Session Raspberry Pi non disponible")
+            print("Raspberry Pi session not available")
         }
     },
     dataCode: { session, receivedData in
-        print("Données de contrôle reçues en format binaire")
+        print("Control data received in binary format")
     },
     connectedCode: { session in
-        print("Client iPhone connecté à la route controlData")
+        print("iPhone client connected to controlData route")
     },
     disconnectedCode: { session in
-        print("Client iPhone déconnecté de la route controlData")
+        print("iPhone client disconnected from controlData route")
     }
 ))
 
-// Route rpiConnect (Raspberry Pi vers Mac)
+// Route status
 serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
-    routeName: "rpiConnect",
+    routeName: "status",
     textCode: { session, receivedText in
-        print("Message du Raspberry Pi : \(receivedText)")
+        // No need to handle received text for this route
     },
     dataCode: { session, receivedData in
-        print("Données reçues du Raspberry Pi")
+        // No need to handle received data for this route
     },
     connectedCode: { session in
-        serverWS.rpiSession = session
-        print("Session avec le Raspberry Pi établie")
+        // Add session to statusSessions
+        serverWS.statusSessions.append(session)
+        print("Client connected to /status route")
+        // Send the current status immediately
+        serverWS.sendStatusUpdate()
     },
     disconnectedCode: { session in
-        if serverWS.rpiSession === session {
-            serverWS.rpiSession = nil
-            print("Session avec le Raspberry Pi fermée")
-        }
+        // Remove session from statusSessions
+        serverWS.statusSessions.removeAll { $0 === session }
+        print("Client disconnected from /status route")
     }
 ))
 
+// Start the server
 serverWS.start()
 
 RunLoop.main.run()
-

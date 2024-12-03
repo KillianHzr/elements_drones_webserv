@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Connected Devices</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        .device-list {
+            list-style-type: none;
+            padding: 0;
+        }
+        .device-list li {
+            padding: 8px;
+            margin: 4px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+        }
+        .connected {
+            color: green;
+        }
+        .disconnected {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <h1>Connected Devices</h1>
+    <ul id="device-list" class="device-list"></ul>
+
+    <script>
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsHost = window.location.host;
+        const ws = new WebSocket(`${wsProtocol}://${wsHost}/status`);
+
+        ws.onopen = () => {
+            console.log('Connected to the server');
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            const deviceList = document.getElementById('device-list');
+            deviceList.innerHTML = '';
+
+            for (const [device, isConnected] of Object.entries(data)) {
+                const li = document.createElement('li');
+                li.textContent = `${device}: ${isConnected ? 'Connected' : 'Disconnected'}`;
+                li.className = isConnected ? 'connected' : 'disconnected';
+                deviceList.appendChild(li);
+            }
+        };
+
+        ws.onclose = () => {
+            console.log('Disconnected from the server');
+        };
+    </script>
+</body>
+</html>
