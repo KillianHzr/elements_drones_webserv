@@ -32,23 +32,26 @@ class WebSockerServer {
     
     static let instance = WebSockerServer()
     let server = HttpServer()
-    
+
     var rpiClient: ClientSession?
     var iPhoneClient: ClientSession?
     var windowsClient: ClientSession?
     var screenCaptureClient: ClientSession?
+    var dancePadClient: ClientSession?
     var statusSessions: [WebSocketSession] = []
-    
-    var connectedDevices: [String: Bool] = [
+
+    var connectedDevices: [String: Any] = [
         "iPhone": false,
         "RPi": false,
         "Windows": false,
         "Script cursor_control": false,
-        "Script screen_capture": false
+        "Script screen_capture": false,
+        "Spheros": [],
+        "DancePad": false
     ]
     
     func updateWindowsStatus() {
-        connectedDevices["Windows"] = connectedDevices["Script cursor_control"] == true || connectedDevices["Script screen_capture"] == true
+        connectedDevices["Windows"] = (connectedDevices["Script cursor_control"] != nil) == true || (connectedDevices["Script screen_capture"] != nil) == true
     }
     
     func setupWithRoutesInfos(routeInfos: RouteInfos) {
@@ -80,6 +83,8 @@ class WebSockerServer {
             <style>
                 body {
                     font-family: Arial, sans-serif;
+                    background: #141414;
+                    color: white;
                 }
                 .device-list {
                     list-style-type: none;
@@ -88,14 +93,14 @@ class WebSockerServer {
                 .device-list li {
                     padding: 8px;
                     margin: 4px;
-                    background-color: #f0f0f0;
+                    background-color: #3b3b3b;
                     border-radius: 4px;
                 }
                 .connected {
-                    color: green;
+                    color: #37f037;
                 }
                 .disconnected {
-                    color: red;
+                    color: #ff3737;
                 }
                 .script-list {
                     list-style-type: none;
@@ -120,6 +125,13 @@ class WebSockerServer {
                     const data = JSON.parse(event.data);
                     const deviceList = document.getElementById('device-list');
                     deviceList.innerHTML = '';
+        
+                    // Handle DancePad
+                    const dancePadConnected = data['DancePad'];
+                    const dancePadLi = document.createElement('li');
+                    dancePadLi.textContent = `DancePad: ${dancePadConnected ? 'Connected' : 'Disconnected'}`;
+                    dancePadLi.className = dancePadConnected ? 'connected' : 'disconnected';
+                    deviceList.appendChild(dancePadLi);
 
                     // Handle Windows separately
                     const windowsConnected = data['Windows'];
@@ -149,15 +161,33 @@ class WebSockerServer {
                     windowsLi.appendChild(scriptList);
                     deviceList.appendChild(windowsLi);
 
-                    // Handle other devices (iPhone and RPi)
-                    const otherDevices = ['iPhone', 'RPi'];
-                    for (const device of otherDevices) {
-                        const isConnected = data[device];
-                        const li = document.createElement('li');
-                        li.textContent = `${device}: ${isConnected ? 'Connected' : 'Disconnected'}`;
-                        li.className = isConnected ? 'connected' : 'disconnected';
-                        deviceList.appendChild(li);
+                    // Handle iPhone
+                    const iPhoneConnected = data['iPhone'];
+                    const iPhoneLi = document.createElement('li');
+                    iPhoneLi.textContent = `iPhone: ${iPhoneConnected ? 'Connected' : 'Disconnected'}`;
+                    iPhoneLi.className = iPhoneConnected ? 'connected' : 'disconnected';
+
+                    // Add Spheros under iPhone
+                    const spheroList = document.createElement('ul');
+                    spheroList.className = 'script-list'; // Use a class for nested lists
+                    const spheros = data['Spheros'];
+                    if (spheros && spheros.length > 0) {
+                        for (const spheroName of spheros) {
+                            const spheroItem = document.createElement('li');
+                            spheroItem.textContent = spheroName;
+                            spheroItem.className = 'connected';
+                            spheroList.appendChild(spheroItem);
+                        }
+                        iPhoneLi.appendChild(spheroList);
                     }
+                    deviceList.appendChild(iPhoneLi);
+
+                    // Handle RPi
+                    const rpiConnected = data['RPi'];
+                    const rpiLi = document.createElement('li');
+                    rpiLi.textContent = `RPi: ${rpiConnected ? 'Connected' : 'Disconnected'}`;
+                    rpiLi.className = rpiConnected ? 'connected' : 'disconnected';
+                    deviceList.appendChild(rpiLi);
                 };
 
                 ws.onclose = () => {
@@ -257,6 +287,22 @@ class WebSockerServer {
             }
         } else {
             connectedDevices["Windows"] = false
+        }
+        
+        // Pour DancePad
+        if let dancePadClient = self.dancePadClient {
+            dancePadClient.session.writeText("ping")
+            dancePadClient.lastPingTime = Date()
+            
+            let timeSinceLastPong = Date().timeIntervalSince(dancePadClient.lastPongTime)
+            if timeSinceLastPong > 6.0 {
+                connectedDevices["DancePad"] = false
+                self.dancePadClient = nil
+                sendStatusUpdate()
+                print("DancePad n'a pas répondu au ping. Marqué comme déconnecté.")
+            }
+        } else {
+            connectedDevices["DancePad"] = false
         }
         
         // For RPi

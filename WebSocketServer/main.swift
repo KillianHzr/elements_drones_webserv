@@ -58,8 +58,18 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
                 print("Received pong from iPhone")
             }
         } else {
-            // Handle other messages
+            // Traitement des messages autres que "pong"
             print("iPhone received text message: \(receivedText)")
+            if let data = receivedText.data(using: .utf8),
+               let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+               let messageType = messageDict["type"] as? String {
+                if messageType == "spheroStatus",
+                   let connectedBolts = messageDict["connectedBolts"] as? [String] {
+                    // Mise à jour de la liste des Spheros connectés
+                    serverWS.connectedDevices["Spheros"] = connectedBolts
+                    serverWS.sendStatusUpdate()
+                }
+            }
         }
     },
     dataCode: { session, receivedData in
@@ -76,6 +86,8 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
         if serverWS.iPhoneClient?.session === session {
             serverWS.iPhoneClient = nil
             serverWS.connectedDevices["iPhone"] = false
+            // Réinitialisation de la liste des Spheros connectés
+            serverWS.connectedDevices["Spheros"] = []
             serverWS.sendStatusUpdate()
             print("iPhone disconnected and session cleared")
         }
@@ -344,6 +356,87 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
         // Remove session from statusSessions
         serverWS.statusSessions.removeAll { $0 === session }
         print("Client disconnected from /status route")
+    }
+))
+
+// Route dancePadConnect
+serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
+    routeName: "dancePadConnect",
+    textCode: { session, receivedText in
+        // Traiter les données reçues de l'ESP32
+        print("DancePad a envoyé : \(receivedText)")
+
+        // Parse the received text into a dictionary
+        if let data = receivedText.data(using: .utf8),
+           let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+           let buttonNumberValue = messageDict["button"],
+           let state = messageDict["state"] as? String {
+
+            // Convertir buttonNumber en Int
+            var buttonNumber: Int?
+            if let number = buttonNumberValue as? NSNumber {
+                buttonNumber = number.intValue
+            } else if let numberString = buttonNumberValue as? String, let number = Int(numberString) {
+                buttonNumber = number
+            }
+
+            if let buttonNumber = buttonNumber {
+                // Map button numbers to actions
+                let actionMap = [
+                    1: "forward",
+                    2: "backward",
+                    3: "left",
+                    4: "right"
+                ]
+
+                if let action = actionMap[buttonNumber] {
+                    let isPressed = (state == "pressed")
+
+                    // Create the message to send to the RPi
+                    let messageToSend: [String: Any] = [
+                        "action": action,
+                        "isPressed": isPressed
+                    ]
+
+                    // Convert the message to JSON string
+                    if let jsonData = try? JSONSerialization.data(withJSONObject: messageToSend, options: []),
+                       let jsonString = String(data: jsonData, encoding: .utf8) {
+
+                        // Send the message to the RPi
+                        if let rpiSession = serverWS.rpiClient?.session {
+                            rpiSession.writeText(jsonString)
+                            print("Message envoyé au Raspberry Pi : \(jsonString)")
+                        } else {
+                            print("Raspberry Pi n'est pas connecté")
+                        }
+                    }
+                } else {
+                    print("Bouton inconnu : \(buttonNumber)")
+                }
+            } else {
+                print("Impossible de lire le numéro de bouton")
+            }
+        } else {
+            print("Format de message invalide")
+        }
+    },
+    dataCode: { session, receivedData in
+        print("DancePad a envoyé des données binaires")
+    },
+    connectedCode: { session in
+        let clientSession = ClientSession(session: session)
+        serverWS.dancePadClient = clientSession
+        serverWS.connectedDevices["DancePad"] = true
+        serverWS.sendStatusUpdate()
+        print("DancePad connecté")
+    },
+    disconnectedCode: { session in
+        if serverWS.dancePadClient?.session === session {
+            serverWS.dancePadClient = nil
+            serverWS.connectedDevices["DancePad"] = false
+            serverWS.sendStatusUpdate()
+            print("DancePad déconnecté")
+        }
     }
 ))
 
