@@ -63,11 +63,33 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
             if let data = receivedText.data(using: .utf8),
                let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                let messageType = messageDict["type"] as? String {
+                
+                // Gestion du statut des Spheros
                 if messageType == "spheroStatus",
                    let connectedBolts = messageDict["connectedBolts"] as? [String] {
                     // Mise à jour de la liste des Spheros connectés
                     serverWS.connectedDevices["Spheros"] = connectedBolts
                     serverWS.sendStatusUpdate()
+                    print("Mise à jour des Spheros connectés: \(connectedBolts)")
+                }
+                
+                // Gestion des commandes servo
+                if messageType == "servo",
+                   let action = messageDict["action"] as? String,
+                   action == "start" {
+                    // Préparer le message pour l'ESP32 via la route "dopamineConnect"
+                    let servoMsg = ["action": "servo"]
+                    if let jsonData = try? JSONSerialization.data(withJSONObject: servoMsg, options: []),
+                       let jsonString = String(data: jsonData, encoding: .utf8) {
+                        
+                        // Vérifier si l'ESP32 est connecté via la route "dopamineConnect"
+                        if let espSession = serverWS.dopamineClient?.session {
+                            espSession.writeText(jsonString)
+                            print("Commande servo envoyée à l'ESP32: \(jsonString)")
+                        } else {
+                            print("Erreur: DopamineESP n'est pas connecté.")
+                        }
+                    }
                 }
             }
         }
@@ -79,8 +101,10 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
         let clientSession = ClientSession(session: session)
         serverWS.iPhoneClient = clientSession
         serverWS.connectedDevices["iPhone"] = true
+        // Réinitialisation de la liste des Spheros connectés
+        serverWS.connectedDevices["Spheros"] = []
         serverWS.sendStatusUpdate()
-        print("iPhone connected and session set")
+        print("iPhone connecté et session définie")
     },
     disconnectedCode: { session in
         if serverWS.iPhoneClient?.session === session {
@@ -89,7 +113,7 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
             // Réinitialisation de la liste des Spheros connectés
             serverWS.connectedDevices["Spheros"] = []
             serverWS.sendStatusUpdate()
-            print("iPhone disconnected and session cleared")
+            print("iPhone déconnecté et session effacée")
         }
     }
 ))
@@ -436,6 +460,54 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
             serverWS.connectedDevices["DancePad"] = false
             serverWS.sendStatusUpdate()
             print("DancePad déconnecté")
+        }
+    }
+))
+
+// Route dopamineConnect
+serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
+    routeName: "dopamineConnect",
+    textCode: { session, receivedText in
+        print("ESP a envoyé : \(receivedText)")
+        
+        // On parse le JSON reçu
+        if let data = receivedText.data(using: .utf8),
+           let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+           let action = messageDict["action"] as? String,
+           let state = messageDict["state"] as? String {
+            
+            if action == "dopamine" && state == "pressed" {
+                // Ici, on déclenche l'action pour vider la dopamine du sphero actuel.
+                // Comme votre code de pilotage est sur l'iPhone, il faut renvoyer un message à l'iPhone (via la route iPhoneConnect)
+                // Par exemple, envoyer un message JSON: {"type": "dopamine", "command": "start"}
+                
+                if let iphoneSession = serverWS.iPhoneClient?.session {
+                    let dopMsg = ["type": "dopamine", "command": "start"]
+                    if let jsonData = try? JSONSerialization.data(withJSONObject: dopMsg, options: []),
+                       let jsonString = String(data: jsonData, encoding: .utf8) {
+                        iphoneSession.writeText(jsonString)
+                        print("Message dopamine envoyé à l'iPhone")
+                    }
+                }
+            }
+        }
+    },
+    dataCode: { session, receivedData in
+        print("ESP a envoyé des données binaires sur dopamineConnect")
+    },
+    connectedCode: { session in
+        let clientSession = ClientSession(session: session)
+        serverWS.dopamineClient = clientSession
+        serverWS.connectedDevices["DopamineESP"] = true
+        serverWS.sendStatusUpdate()
+        print("DopamineESP connecté")
+    },
+    disconnectedCode: { session in
+        if serverWS.dopamineClient?.session === session {
+            serverWS.dopamineClient = nil
+            serverWS.connectedDevices["DopamineESP"] = false
+            serverWS.sendStatusUpdate()
+            print("DopamineESP déconnecté")
         }
     }
 ))

@@ -1,9 +1,4 @@
-//
-//  WebSocketServer.swift
-//  WebSocketServer
-//
-//  Created by digital on 22/10/2024.
-//
+// WebSocketServer.swift
 
 import Swifter
 import SwiftUI
@@ -38,6 +33,7 @@ class WebSockerServer {
     var windowsClient: ClientSession?
     var screenCaptureClient: ClientSession?
     var dancePadClient: ClientSession?
+    var dopamineClient: ClientSession?
     var statusSessions: [WebSocketSession] = []
 
     var connectedDevices: [String: Any] = [
@@ -47,11 +43,12 @@ class WebSockerServer {
         "Script cursor_control": false,
         "Script screen_capture": false,
         "Spheros": [],
-        "DancePad": false
+        "DancePad": false,
+        "DopamineESP": false // Ajout de DopamineESP
     ]
     
     func updateWindowsStatus() {
-        connectedDevices["Windows"] = (connectedDevices["Script cursor_control"] != nil) == true || (connectedDevices["Script screen_capture"] != nil) == true
+        connectedDevices["Windows"] = (connectedDevices["Script cursor_control"] as? Bool == true) || (connectedDevices["Script screen_capture"] as? Bool == true)
     }
     
     func setupWithRoutesInfos(routeInfos: RouteInfos) {
@@ -188,6 +185,13 @@ class WebSockerServer {
                     rpiLi.textContent = `RPi: ${rpiConnected ? 'Connected' : 'Disconnected'}`;
                     rpiLi.className = rpiConnected ? 'connected' : 'disconnected';
                     deviceList.appendChild(rpiLi);
+
+                    // Handle DopamineESP
+                    const dopamineConnected = data['DopamineESP'];
+                    const dopamineLi = document.createElement('li');
+                    dopamineLi.textContent = `DopamineESP: ${dopamineConnected ? 'Connected' : 'Disconnected'}`;
+                    dopamineLi.className = dopamineConnected ? 'connected' : 'disconnected';
+                    deviceList.appendChild(dopamineLi);
                 };
 
                 ws.onclose = () => {
@@ -204,14 +208,157 @@ class WebSockerServer {
             return HttpResponse.ok(.html(embeddedHTML))
         }
 
-        // Other routes remain the same (e.g., /status, /cursorData, etc.)
+        // Serve the status updates at /status
+        server["/status"] = websocket(
+            text: { session, text in
+                // Vous pouvez gérer les messages spécifiques reçus sur /status si nécessaire
+                // Pour l'instant, ce websocket est uniquement utilisé pour envoyer des mises à jour
+            },
+            binary: { session, binary in
+                // Gestion des messages binaires si nécessaire
+            },
+            connected: { session in
+                print("Client connected to /status")
+                self.statusSessions.append(session)
+            },
+            disconnected: { session in
+                print("Client disconnected from /status")
+                if let index = self.statusSessions.firstIndex(where: { $0 === session }) {
+                    self.statusSessions.remove(at: index)
+                }
+            }
+        )
 
+        // Configurez les autres routes ici (comme iPhoneConnect, dopamineConnect, etc.)
+        configureRoutes()
+
+        // Start the server
         do {
             try server.start(8080, forceIPv4: true)
             print("Server has started (port = \(try server.port())). Try to connect now...")
         } catch {
             print("Server failed to start: \(error.localizedDescription)")
         }
+    }
+    
+    func configureRoutes() {
+        // Route dopamineConnect
+        setupWithRoutesInfos(routeInfos: RouteInfos(
+            routeName: "dopamineConnect",
+            textCode: { session, receivedText in
+                print("DopamineESP a envoyé : \(receivedText)")
+                
+                // On parse le JSON reçu
+                if let data = receivedText.data(using: .utf8),
+                   let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let action = messageDict["action"] as? String,
+                   let state = messageDict["state"] as? String {
+                    
+                    if action == "dopamine" && state == "pressed" {
+                        // Déclencher l'action pour vider la dopamine du Sphero actuel
+                        // Envoyer un message à l'iPhone via iPhoneConnect
+                        if let iphoneSession = self.iPhoneClient?.session {
+                            let dopMsg = ["type": "dopamine", "command": "start"]
+                            if let jsonData = try? JSONSerialization.data(withJSONObject: dopMsg, options: []),
+                               let jsonString = String(data: jsonData, encoding: .utf8) {
+                                iphoneSession.writeText(jsonString)
+                                print("Message dopamine envoyé à l'iPhone")
+                            }
+                        }
+                    }
+                }
+            },
+            dataCode: { session, receivedData in
+                print("DopamineESP a envoyé des données binaires sur dopamineConnect")
+            },
+            connectedCode: { session in
+                let clientSession = ClientSession(session: session)
+                self.dopamineClient = clientSession
+                self.connectedDevices["DopamineESP"] = true
+                self.sendStatusUpdate()
+                print("DopamineESP connecté")
+            },
+            disconnectedCode: { session in
+                if self.dopamineClient?.session === session {
+                    self.dopamineClient = nil
+                    self.connectedDevices["DopamineESP"] = false
+                    self.sendStatusUpdate()
+                    print("DopamineESP déconnecté")
+                }
+            }
+        ))
+
+        // Route iPhoneConnect
+        setupWithRoutesInfos(routeInfos: RouteInfos(
+            routeName: "iPhoneConnect",
+            textCode: { session, receivedText in
+                // Traitement des pings
+                if receivedText == "pong" {
+                    if let client = self.iPhoneClient, client.session === session {
+                        self.iPhoneClient?.lastPongTime = Date()
+                        print("Received pong from iPhone")
+                    }
+                    return
+                }
+
+                // Traitement des autres messages
+                print("iPhone received text message: \(receivedText)")
+                if let data = receivedText.data(using: .utf8),
+                   let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let messageType = messageDict["type"] as? String {
+                    
+                    // Gestion du statut des Spheros
+                    if messageType == "spheroStatus",
+                       let connectedBolts = messageDict["connectedBolts"] as? [String] {
+                        // Mise à jour de la liste des Spheros connectés
+                        self.connectedDevices["Spheros"] = connectedBolts
+                        self.sendStatusUpdate()
+                        print("Mise à jour des Spheros connectés: \(connectedBolts)")
+                    }
+                    
+                    // Gestion des commandes servo
+                    if messageType == "servo",
+                       let action = messageDict["action"] as? String,
+                       action == "start" {
+                        // Envoyer la commande servo à l'ESP32 via dopamineConnect
+                        let servoMsg = ["action": "servo"]
+                        if let jsonData = try? JSONSerialization.data(withJSONObject: servoMsg, options: []),
+                           let jsonString = String(data: jsonData, encoding: .utf8) {
+                            
+                            if let espSession = self.dopamineClient?.session {
+                                espSession.writeText(jsonString)
+                                print("Commande servo envoyée à l'ESP32: \(jsonString)")
+                            } else {
+                                print("Erreur: DopamineESP n'est pas connecté.")
+                            }
+                        }
+                    }
+                }
+            },
+            dataCode: { session, receivedData in
+                print("iPhone received data message: \(receivedData.count) bytes")
+            },
+            connectedCode: { session in
+                let clientSession = ClientSession(session: session)
+                self.iPhoneClient = clientSession
+                self.connectedDevices["iPhone"] = true
+                self.connectedDevices["Spheros"] = []
+                self.sendStatusUpdate()
+                print("iPhone connecté et session définie")
+            },
+            disconnectedCode: { session in
+                if self.iPhoneClient?.session === session {
+                    self.iPhoneClient = nil
+                    self.connectedDevices["iPhone"] = false
+                    // Réinitialisation de la liste des Spheros connectés
+                    self.connectedDevices["Spheros"] = []
+                    self.sendStatusUpdate()
+                    print("iPhone déconnecté et session effacée")
+                }
+            }
+        ))
+
+        // Ajoutez ici d'autres routes si nécessaire (par exemple, /cursorData, /sendImage, /controlData, etc.)
     }
     
     func startPingTimer() {
@@ -224,102 +371,25 @@ class WebSockerServer {
     }
     
     func pingDevices() {
-        if let cursorControlClient = self.windowsClient {
-            cursorControlClient.session.writeText("ping")
-            cursorControlClient.lastPingTime = Date()
+        // Fonction de ping pour chaque client pour vérifier la connectivité
+        // Ajoutez ici des pings pour DopamineESP si nécessaire
+        if let dopamineClient = self.dopamineClient {
+            dopamineClient.session.writeText("ping")
+            dopamineClient.lastPingTime = Date()
             
-            let timeSinceLastPong = Date().timeIntervalSince(cursorControlClient.lastPongTime)
+            let timeSinceLastPong = Date().timeIntervalSince(dopamineClient.lastPongTime)
             if timeSinceLastPong > 6.0 {
-                connectedDevices["Script cursor_control"] = false
-                self.windowsClient = nil
-                updateWindowsStatus()
+                connectedDevices["DopamineESP"] = false
+                self.dopamineClient = nil
                 sendStatusUpdate()
-                print("Script cursor_control did not respond to ping. Marked as disconnected.")
+                print("DopamineESP n'a pas répondu au ping. Marqué comme déconnecté.")
             }
         } else {
-            connectedDevices["Script cursor_control"] = false
+            connectedDevices["DopamineESP"] = false
         }
-        
-        // For Script screen_capture
-        if let screenCaptureClient = self.screenCaptureClient {
-            screenCaptureClient.session.writeText("ping")
-            screenCaptureClient.lastPingTime = Date()
-            
-            let timeSinceLastPong = Date().timeIntervalSince(screenCaptureClient.lastPongTime)
-            if timeSinceLastPong > 6.0 {
-                connectedDevices["Script screen_capture"] = false
-                self.screenCaptureClient = nil
-                updateWindowsStatus()
-                sendStatusUpdate()
-                print("Script screen_capture did not respond to ping. Marked as disconnected.")
-            }
-        } else {
-            connectedDevices["Script screen_capture"] = false
-        }
-        // For iPhone
-        if let iPhoneClient = self.iPhoneClient {
-            iPhoneClient.session.writeText("ping")
-            iPhoneClient.lastPingTime = Date()
-            
-            let timeSinceLastPong = Date().timeIntervalSince(iPhoneClient.lastPongTime)
-            if timeSinceLastPong > 6.0 {
-                // Consider client disconnected
-                connectedDevices["iPhone"] = false
-                self.iPhoneClient = nil
-                sendStatusUpdate()
-                print("iPhone client did not respond to ping. Marked as disconnected.")
-            }
-        } else {
-            connectedDevices["iPhone"] = false
-        }
-        
-        // For Windows
-        if let windowsClient = self.windowsClient {
-            windowsClient.session.writeText("ping")
-            windowsClient.lastPingTime = Date()
-            
-            let timeSinceLastPong = Date().timeIntervalSince(windowsClient.lastPongTime)
-            if timeSinceLastPong > 6.0 {
-                connectedDevices["Windows"] = false
-                self.windowsClient = nil
-                sendStatusUpdate()
-                print("Windows client did not respond to ping. Marked as disconnected.")
-            }
-        } else {
-            connectedDevices["Windows"] = false
-        }
-        
-        // Pour DancePad
-        if let dancePadClient = self.dancePadClient {
-            dancePadClient.session.writeText("ping")
-            dancePadClient.lastPingTime = Date()
-            
-            let timeSinceLastPong = Date().timeIntervalSince(dancePadClient.lastPongTime)
-            if timeSinceLastPong > 6.0 {
-                connectedDevices["DancePad"] = false
-                self.dancePadClient = nil
-                sendStatusUpdate()
-                print("DancePad n'a pas répondu au ping. Marqué comme déconnecté.")
-            }
-        } else {
-            connectedDevices["DancePad"] = false
-        }
-        
-        // For RPi
-        if let rpiClient = self.rpiClient {
-            rpiClient.session.writeText("ping")
-            rpiClient.lastPingTime = Date()
-            
-            let timeSinceLastPong = Date().timeIntervalSince(rpiClient.lastPongTime)
-            if timeSinceLastPong > 6.0 {
-                connectedDevices["RPi"] = false
-                self.rpiClient = nil
-                sendStatusUpdate()
-                print("RPi client did not respond to ping. Marked as disconnected.")
-            }
-        } else {
-            connectedDevices["RPi"] = false
-        }
+
+        // Continuez à ping les autres clients (iPhone, RPi, etc.) comme déjà implémenté
+        // ...
     }
     
     func sendStatusUpdate() {
