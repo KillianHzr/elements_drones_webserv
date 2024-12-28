@@ -27,6 +27,9 @@ class WebSockerServer {
     
     static let instance = WebSockerServer()
     let server = HttpServer()
+    
+    var joystickState: [String: Int] = ["x": 0, "y": 0]
+    var latestIphoneVideoFrame: Data?
 
     var rpiClient: ClientSession?
     var iPhoneClient: ClientSession?
@@ -34,7 +37,11 @@ class WebSockerServer {
     var screenCaptureClient: ClientSession?
     var dancePadClient: ClientSession?
     var dopamineClient: ClientSession?
+    var controllerEspClient: ClientSession?
+    var rfidEspClient: ClientSession?
     var statusSessions: [WebSocketSession] = []
+    var mac3PagesClient: ClientSession?
+    var iPhoneLiveVideoClient: ClientSession?
 
     var connectedDevices: [String: Any] = [
         "iPhone": false,
@@ -44,8 +51,26 @@ class WebSockerServer {
         "Script screen_capture": false,
         "Spheros": [],
         "DancePad": false,
-        "DopamineESP": false // Ajout de DopamineESP
+        "DopamineESP": false,
+        "ControllerESP": false,
+        "RfidESP": false
     ]
+    
+    func sendJoystickStateToIphone() {
+        let joystickMsg: [String: Any] = [
+            "type": "joystick",
+            "x": joystickState["x"] ?? 0,
+            "y": joystickState["y"] ?? 0
+        ]
+
+        if let iphoneSession = self.iPhoneClient?.session {
+            if let jsonData = try? JSONSerialization.data(withJSONObject: joystickMsg, options: []),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                iphoneSession.writeText(jsonString)
+                print("Joystick state sent to iPhone")
+            }
+        }
+    }
     
     func updateWindowsStatus() {
         connectedDevices["Windows"] = (connectedDevices["Script cursor_control"] as? Bool == true) || (connectedDevices["Script screen_capture"] as? Bool == true)
@@ -71,7 +96,8 @@ class WebSockerServer {
     }
     
     func start() {
-        // Embedded HTML content as a Swift string
+        // Updated embeddedHTML in WebSocketServer.swift
+
         let embeddedHTML = """
         <!DOCTYPE html>
         <html>
@@ -122,7 +148,7 @@ class WebSockerServer {
                     const data = JSON.parse(event.data);
                     const deviceList = document.getElementById('device-list');
                     deviceList.innerHTML = '';
-        
+            
                     // Handle DancePad
                     const dancePadConnected = data['DancePad'];
                     const dancePadLi = document.createElement('li');
@@ -192,6 +218,20 @@ class WebSockerServer {
                     dopamineLi.textContent = `DopamineESP: ${dopamineConnected ? 'Connected' : 'Disconnected'}`;
                     dopamineLi.className = dopamineConnected ? 'connected' : 'disconnected';
                     deviceList.appendChild(dopamineLi);
+
+                    // Handle ControllerESP
+                    const controllerESPConnected = data['ControllerESP'];
+                    const controllerESPLi = document.createElement('li');
+                    controllerESPLi.textContent = `ControllerESP: ${controllerESPConnected ? 'Connected' : 'Disconnected'}`;
+                    controllerESPLi.className = controllerESPConnected ? 'connected' : 'disconnected';
+                    deviceList.appendChild(controllerESPLi);
+        
+                    // Handle RfidESP
+                    const rfidEspConnected = data['RfidESP'];
+                    const rfidEspLi = document.createElement('li');
+                    rfidEspLi.textContent = `RFID ESP: ${rfidEspConnected ? 'Connected' : 'Disconnected'}`;
+                    rfidEspLi.className = rfidEspConnected ? 'connected' : 'disconnected';
+                    deviceList.appendChild(rfidEspLi);
                 };
 
                 ws.onclose = () => {
@@ -200,7 +240,6 @@ class WebSockerServer {
             </script>
         </body>
         </html>
-
         """
 
         // Serve the embedded HTML content when accessing the root URL
@@ -242,6 +281,160 @@ class WebSockerServer {
     }
     
     func configureRoutes() {
+        // Route iPhoneConnect
+            setupWithRoutesInfos(routeInfos: RouteInfos(
+                routeName: "iPhoneConnect",
+                textCode: { session, receivedText in
+                    // Traitement des pings
+                    if receivedText == "pong" {
+                        if let client = self.iPhoneClient, client.session === session {
+                            self.iPhoneClient?.lastPongTime = Date()
+                            print("Received pong from iPhone")
+                        }
+                        return
+                    }
+
+                    // Traitement des autres messages
+                    print("iPhone received text message: \(receivedText)")
+                    if let data = receivedText.data(using: .utf8),
+                       let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                       let messageType = messageDict["type"] as? String {
+
+                        if messageType == "joystick",
+                           let x = messageDict["x"] as? Int,
+                           let y = messageDict["y"] as? Int {
+
+                            // Mise à jour de l'état du joystick
+                            self.joystickState["x"] = x
+                            self.joystickState["y"] = y
+
+                            // Envoi de l'état mis à jour au client iPhone
+                            self.sendJoystickStateToIphone()
+                        }
+
+                        // Gestion des autres types de messages (spheroStatus, servo, etc.)
+                        if messageType == "spheroStatus",
+                           let connectedBolts = messageDict["connectedBolts"] as? [String] {
+                            self.connectedDevices["Spheros"] = connectedBolts
+                            self.sendStatusUpdate()
+                            print("Mise à jour des Spheros connectés: \(connectedBolts)")
+                        }
+
+                        if messageType == "servo",
+                           let action = messageDict["action"] as? String,
+                           action == "start" {
+                            // Envoyer la commande servo à l'ESP32 via dopamineConnect
+                            let servoMsg = ["action": "servo"]
+                            if let jsonData = try? JSONSerialization.data(withJSONObject: servoMsg, options: []),
+                               let jsonString = String(data: jsonData, encoding: .utf8) {
+
+                                if let espSession = self.dopamineClient?.session {
+                                    espSession.writeText(jsonString)
+                                    print("Commande servo envoyée à l'ESP32: \(jsonString)")
+                                } else {
+                                    print("Erreur: DopamineESP n'est pas connecté.")
+                                }
+                            }
+                        }
+                    }
+                },
+                dataCode: { session, receivedData in
+                    print("iPhone received data message: \(receivedData.count) bytes")
+                },
+                connectedCode: { session in
+                    let clientSession = ClientSession(session: session)
+                    self.iPhoneClient = clientSession
+                    self.connectedDevices["iPhone"] = true
+                    self.connectedDevices["Spheros"] = []
+                    self.sendStatusUpdate()
+                    print("iPhone connecté et session définie")
+                },
+                disconnectedCode: { session in
+                    if self.iPhoneClient?.session === session {
+                        self.iPhoneClient = nil
+                        self.connectedDevices["iPhone"] = false
+                        self.connectedDevices["Spheros"] = []
+                        self.sendStatusUpdate()
+                        print("iPhone déconnecté et session effacée")
+                    }
+                }
+            ))
+
+            // Route controllerEsp
+            setupWithRoutesInfos(routeInfos: RouteInfos(
+                routeName: "controllerEsp",
+                textCode: { session, receivedText in
+                    print("ControllerESP a envoyé : \(receivedText)")
+
+                    // Parse le JSON reçu
+                    if let data = receivedText.data(using: .utf8),
+                       let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                       let x = messageDict["x"] as? Int,
+                       let y = messageDict["y"] as? Int {
+
+                        // Mise à jour de l'état du joystick
+                        self.joystickState["x"] = x
+                        self.joystickState["y"] = y
+
+                        // Envoi de l'état mis à jour au client iPhone
+                        self.sendJoystickStateToIphone()
+                    }
+                },
+                dataCode: { session, receivedData in
+                    print("ControllerESP a envoyé des données binaires sur controllerEsp")
+                },
+                connectedCode: { session in
+                    let clientSession = ClientSession(session: session)
+                    self.controllerEspClient = clientSession
+                    self.connectedDevices["ControllerESP"] = true
+                    self.sendStatusUpdate()
+                    print("ControllerESP connecté")
+                },
+                disconnectedCode: { session in
+                    if self.controllerEspClient?.session === session {
+                        self.controllerEspClient = nil
+                        self.connectedDevices["ControllerESP"] = false
+                        self.sendStatusUpdate()
+                        print("ControllerESP déconnecté")
+                    }
+                }
+            ))
+        setupWithRoutesInfos(routeInfos: RouteInfos(
+            routeName: "rfidEsp",
+            textCode: { session, receivedText in
+                print("rfidEsp a envoyé : \(receivedText)")
+                
+                // On parse le JSON reçu pour récupérer l'ID du badge
+                if let data = receivedText.data(using: .utf8),
+                   let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let cardId = messageDict["card_id"] as? Int {
+                    
+                    // Print dans la console du serveur l'ID du badge
+                    print("Badge rfidEsp ID: \(cardId)")
+                    
+                    // Ici, tu peux transmettre l'info à d'autres routes si nécessaire
+                    // ex: if let iphoneSession = self.iPhoneClient?.session { ... }
+                }
+            },
+            dataCode: { session, receivedData in
+                print("rfidEsp a envoyé des données binaires (\(receivedData.count) bytes).")
+            },
+            connectedCode: { session in
+                let clientSession = ClientSession(session: session)
+                self.rfidEspClient = clientSession
+                self.connectedDevices["RfidESP"] = true
+                self.sendStatusUpdate()
+                print("rfidEsp connecté.")
+            },
+            disconnectedCode: { session in
+                if self.rfidEspClient?.session === session {
+                    self.rfidEspClient = nil
+                    self.connectedDevices["RfidESP"] = false
+                    self.sendStatusUpdate()
+                    print("rfidEsp déconnecté.")
+                }
+            }
+        ))
         // Route dopamineConnect
         setupWithRoutesInfos(routeInfos: RouteInfos(
             routeName: "dopamineConnect",
@@ -287,77 +480,6 @@ class WebSockerServer {
                 }
             }
         ))
-
-        // Route iPhoneConnect
-        setupWithRoutesInfos(routeInfos: RouteInfos(
-            routeName: "iPhoneConnect",
-            textCode: { session, receivedText in
-                // Traitement des pings
-                if receivedText == "pong" {
-                    if let client = self.iPhoneClient, client.session === session {
-                        self.iPhoneClient?.lastPongTime = Date()
-                        print("Received pong from iPhone")
-                    }
-                    return
-                }
-
-                // Traitement des autres messages
-                print("iPhone received text message: \(receivedText)")
-                if let data = receivedText.data(using: .utf8),
-                   let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-                   let messageType = messageDict["type"] as? String {
-                    
-                    // Gestion du statut des Spheros
-                    if messageType == "spheroStatus",
-                       let connectedBolts = messageDict["connectedBolts"] as? [String] {
-                        // Mise à jour de la liste des Spheros connectés
-                        self.connectedDevices["Spheros"] = connectedBolts
-                        self.sendStatusUpdate()
-                        print("Mise à jour des Spheros connectés: \(connectedBolts)")
-                    }
-                    
-                    // Gestion des commandes servo
-                    if messageType == "servo",
-                       let action = messageDict["action"] as? String,
-                       action == "start" {
-                        // Envoyer la commande servo à l'ESP32 via dopamineConnect
-                        let servoMsg = ["action": "servo"]
-                        if let jsonData = try? JSONSerialization.data(withJSONObject: servoMsg, options: []),
-                           let jsonString = String(data: jsonData, encoding: .utf8) {
-                            
-                            if let espSession = self.dopamineClient?.session {
-                                espSession.writeText(jsonString)
-                                print("Commande servo envoyée à l'ESP32: \(jsonString)")
-                            } else {
-                                print("Erreur: DopamineESP n'est pas connecté.")
-                            }
-                        }
-                    }
-                }
-            },
-            dataCode: { session, receivedData in
-                print("iPhone received data message: \(receivedData.count) bytes")
-            },
-            connectedCode: { session in
-                let clientSession = ClientSession(session: session)
-                self.iPhoneClient = clientSession
-                self.connectedDevices["iPhone"] = true
-                self.connectedDevices["Spheros"] = []
-                self.sendStatusUpdate()
-                print("iPhone connecté et session définie")
-            },
-            disconnectedCode: { session in
-                if self.iPhoneClient?.session === session {
-                    self.iPhoneClient = nil
-                    self.connectedDevices["iPhone"] = false
-                    // Réinitialisation de la liste des Spheros connectés
-                    self.connectedDevices["Spheros"] = []
-                    self.sendStatusUpdate()
-                    print("iPhone déconnecté et session effacée")
-                }
-            }
-        ))
-
         // Ajoutez ici d'autres routes si nécessaire (par exemple, /cursorData, /sendImage, /controlData, etc.)
     }
     
