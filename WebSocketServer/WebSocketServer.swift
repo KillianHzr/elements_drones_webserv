@@ -11,6 +11,13 @@ struct RouteInfos {
     var disconnectedCode: ((WebSocketSession) -> ())? = nil
 }
 
+struct QteInfo {
+    let qte: String
+    let amusement: Int
+    let badTrip: Int
+    let maladieMentale: Int
+}
+
 class ClientSession {
     var session: WebSocketSession
     var lastPingTime: Date
@@ -28,8 +35,72 @@ class WebSockerServer {
     static let instance = WebSockerServer()
     let server = HttpServer()
     
+    struct BrainStage {
+        var name: String
+        var started: Bool
+        var finished: Bool
+    }
+    
+    var brainStages: [String: BrainStage] = [
+        "Synapse": BrainStage(name: "Synapse", started: false, finished: false),
+        "LSD": BrainStage(name: "LSD", started: false, finished: false),
+        "Ecstasy": BrainStage(name: "Ecstasy", started: false, finished: false),
+        "Champi": BrainStage(name: "Champi", started: false, finished: false)
+    ]
+    
     var joystickState: [String: Int] = ["x": 0, "y": 0]
-    var latestIphoneVideoFrame: Data?
+    var dancePadButtons: [Int: Bool] = [
+        1: false,
+        2: false,
+        3: false,
+        4: false
+    ]
+    
+    struct DancePadButtonInfo {
+        let titre: String
+        let amusement: Int
+        let badTrip: Int
+        let maladieMentale: Int
+    }
+
+    var dancePadButtonProperties: [Int: DancePadButtonInfo] = [
+        1: DancePadButtonInfo(titre: "nature", amusement: 3, badTrip: -2, maladieMentale: -1),
+        2: DancePadButtonInfo(titre: "confortable", amusement: 2, badTrip: -1, maladieMentale: 0),
+        3: DancePadButtonInfo(titre: "foule", amusement: 1, badTrip: 4, maladieMentale: 1),
+        4: DancePadButtonInfo(titre: "rue", amusement: -2, badTrip: 6, maladieMentale: 2)
+    ]
+    
+    var activeDancePadButton: Int? = nil
+
+    struct BadgeInfo {
+        let titre: String
+        let amusement: Int
+        let badTrip: Int
+        let maladieMentale: Int
+    }
+
+    var badgeProperties: [Int: BadgeInfo] = [
+        803109171:   BadgeInfo(titre: "Badge A - Partiels", amusement: -1, badTrip: 3,  maladieMentale: 2),
+        798528483:   BadgeInfo(titre: "Badge B - Perte récente", amusement: -2, badTrip: 4,  maladieMentale: 3),
+        802109907:   BadgeInfo(titre: "Badge C - Sérénité intérieur", amusement: 4, badTrip: -2,  maladieMentale: -1),
+        2886461267:  BadgeInfo(titre: "Badge D - Nouvelle promotion", amusement: 4, badTrip: 1,  maladieMentale: 0),
+        2887059987:  BadgeInfo(titre: "Badge E - Montée d'énergie incontrôlée", amusement: 3, badTrip: 3,  maladieMentale: 2)
+    ]
+    
+    // Dernières valeurs reçues de la qte des buzzers
+    var lastBuzzersAmusement: Int = 0
+    var lastBuzzersBadTrip: Int = 0
+    var lastBuzzersMaladieMentale: Int = 0
+
+    // Dernières valeurs reçues du RFID
+    var lastRfidAmusement: Int = 0
+    var lastRfidBadTrip: Int = 0
+    var lastRfidMaladieMentale: Int = 0
+
+    // Dernières valeurs reçues du DancePad
+    var lastDancePadAmusement: Int = 0
+    var lastDancePadBadTrip: Int = 0
+    var lastDancePadMaladieMentale: Int = 0
 
     var rpiClient: ClientSession?
     var iPhoneClient: ClientSession?
@@ -39,9 +110,8 @@ class WebSockerServer {
     var dopamineClient: ClientSession?
     var controllerEspClient: ClientSession?
     var rfidEspClient: ClientSession?
+    var buzzersEspClient: ClientSession?
     var statusSessions: [WebSocketSession] = []
-    var mac3PagesClient: ClientSession?
-    var iPhoneLiveVideoClient: ClientSession?
 
     var connectedDevices: [String: Any] = [
         "iPhone": false,
@@ -53,7 +123,8 @@ class WebSockerServer {
         "DancePad": false,
         "DopamineESP": false,
         "ControllerESP": false,
-        "RfidESP": false
+        "RfidESP": false,
+        "BuzzersESP": false
     ]
     
     func sendJoystickStateToIphone() {
@@ -68,6 +139,149 @@ class WebSockerServer {
                let jsonString = String(data: jsonData, encoding: .utf8) {
                 iphoneSession.writeText(jsonString)
                 print("Joystick state sent to iPhone")
+            }
+        }
+    }
+    
+    func checkSolution() {
+        // 1) On additionne les amusements
+        let totalAmusement = lastBuzzersAmusement + lastRfidAmusement + lastDancePadAmusement
+        let totalBadTrip = lastBuzzersBadTrip + lastRfidBadTrip + lastDancePadBadTrip
+        let totalMaladie = lastBuzzersMaladieMentale + lastRfidMaladieMentale + lastDancePadMaladieMentale
+
+        // 2) Vérifier les conditions
+        let isGoodSolution = (totalAmusement > 10) && (totalBadTrip <= 0) && (totalMaladie <= 1)
+
+        // 3) Construire le JSON
+        let msg: [String: Any] = [
+            "type": "solution",
+            "amusement": totalAmusement,
+            "badTrip": totalBadTrip,
+            "maladieMentale": totalMaladie,
+            "verdict": isGoodSolution ? "bonne" : "mauvaise"
+        ]
+
+        // 4) Envoyer à l’iPhone
+        if let iphoneSession = self.iPhoneClient?.session,
+           let jsonData = try? JSONSerialization.data(withJSONObject: msg, options: []),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            iphoneSession.writeText(jsonString)
+            print("Solution sent to iPhone:", jsonString)
+        }
+    }
+    
+    func sendBuzzersStateToIphone(pressed: Int, total: Int) {
+        let qteInfo: QteInfo
+        
+        switch pressed {
+        case 1, 2:
+            qteInfo = QteInfo(qte: "qte bas", amusement: 2, badTrip: -2, maladieMentale: 0)
+        case 3:
+            qteInfo = QteInfo(qte: "qte neutre", amusement: 5, badTrip: 3, maladieMentale: 1)
+        case 4, 5:
+            qteInfo = QteInfo(qte: "qte haut", amusement: 7, badTrip: 7, maladieMentale: 3)
+        default:
+            qteInfo = QteInfo(qte: "qte bas", amusement: 2, badTrip: -2, maladieMentale: 0)
+        }
+        
+        self.lastBuzzersAmusement = qteInfo.amusement
+        self.lastBuzzersBadTrip = qteInfo.badTrip
+        self.lastBuzzersMaladieMentale = qteInfo.maladieMentale
+        
+        let msg: [String: Any] = [
+            "type": "buzzers",
+            "buzzersPressed": pressed,
+            "buzzersTotal": total,
+            "qte": qteInfo.qte,
+            "amusement": qteInfo.amusement,
+            "badTrip": qteInfo.badTrip,
+            "maladieMentale": qteInfo.maladieMentale
+        ]
+        
+        if let jsonData = try? JSONSerialization.data(withJSONObject: msg, options: []),
+           let jsonString = String(data: jsonData, encoding: .utf8),
+           let iphoneSession = self.iPhoneClient?.session {
+            iphoneSession.writeText(jsonString)
+            print("Buzzers state sent to iPhone:", jsonString)
+        }
+    }
+
+    func sendRfidDataToIphone(cardId: Int) {
+        // Chercher si on a des infos pour ce badge dans le dictionnaire
+        if let badgeInfo = badgeProperties[cardId] {
+            self.lastRfidAmusement = badgeInfo.amusement
+            self.lastRfidBadTrip = badgeInfo.badTrip
+            self.lastRfidMaladieMentale = badgeInfo.maladieMentale
+            
+            // Créer un JSON complet => ex: {"type":"rfid","cardId":12345,"titre":"Période d'examen","amusement":-1,"badTrip":3,"maladieMentale":2}
+            let msg: [String: Any] = [
+                "type": "rfid",
+                "cardId": cardId,
+                "titre": badgeInfo.titre,
+                "amusement": badgeInfo.amusement,
+                "badTrip": badgeInfo.badTrip,
+                "maladieMentale": badgeInfo.maladieMentale
+            ]
+
+            if let jsonData = try? JSONSerialization.data(withJSONObject: msg, options: []),
+               let jsonString = String(data: jsonData, encoding: .utf8),
+               let iphoneSession = self.iPhoneClient?.session {
+                iphoneSession.writeText(jsonString)
+                print("RFID data (avec propriétés) envoyé à l'iPhone: \(jsonString)")
+            } else {
+                print("iPhone pas connecté, ou erreur JSON")
+            }
+        } else {
+            // Si on ne trouve pas d'info => n'envoyer que l'ID
+            let msg: [String: Any] = [
+                "type": "rfid",
+                "cardId": cardId
+            ]
+            if let jsonData = try? JSONSerialization.data(withJSONObject: msg, options: []),
+               let jsonString = String(data: jsonData, encoding: .utf8),
+               let iphoneSession = self.iPhoneClient?.session {
+                iphoneSession.writeText(jsonString)
+                print("RFID data (SANS propriétés) envoyé à l'iPhone: \(jsonString)")
+            }
+        }
+    }
+    
+    func sendDancePadStateToIphone() {
+        if let activeButton = self.activeDancePadButton,
+           let buttonInfo = self.dancePadButtonProperties[activeButton] {
+            self.lastDancePadAmusement = buttonInfo.amusement
+            self.lastDancePadBadTrip = buttonInfo.badTrip
+            self.lastDancePadMaladieMentale = buttonInfo.maladieMentale
+            
+            let msg: [String: Any] = [
+                "type": "dancePad",
+                "button": [
+                    "titre": buttonInfo.titre,
+                    "amusement": buttonInfo.amusement,
+                    "badTrip": buttonInfo.badTrip,
+                    "maladieMentale": buttonInfo.maladieMentale
+                ]
+            ]
+
+            if let jsonData = try? JSONSerialization.data(withJSONObject: msg, options: []),
+               let jsonString = String(data: jsonData, encoding: .utf8),
+               let iphoneSession = self.iPhoneClient?.session {
+                iphoneSession.writeText(jsonString)
+                print("DancePad state sent to iPhone: \(jsonString)")
+            } else {
+                print("iPhone pas connecté ou erreur JSON")
+            }
+        } else {
+            // Aucun bouton actif, envoyer un état vide ou spécifique
+            let msg: [String: Any] = [
+                "type": "dancePad",
+                "button": NSNull()
+            ]
+            if let jsonData = try? JSONSerialization.data(withJSONObject: msg, options: []),
+               let jsonString = String(data: jsonData, encoding: .utf8),
+               let iphoneSession = self.iPhoneClient?.session {
+                iphoneSession.writeText(jsonString)
+                print("DancePad state envoyé à l'iPhone: aucun bouton actif")
             }
         }
     }
@@ -100,14 +314,46 @@ class WebSockerServer {
 
         let embeddedHTML = """
         <!DOCTYPE html>
-        <html>
+        <html lang="en">
         <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Connected Devices</title>
             <style>
                 body {
                     font-family: Arial, sans-serif;
                     background: #141414;
                     color: white;
+                    display: flex;
+                }
+                section {
+                    padding: 20px;
+                    width: 75%;
+                }
+                .section2 {
+                    width: 25%;
+                }
+                h1, h2 {
+                    color: #37f037;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 20px;
+                }
+                th, td {
+                    padding: 10px;
+                    text-align: left;
+                    border: 1px solid #3b3b3b;
+                }
+                th {
+                    background-color: #333;
+                }
+                .connected {
+                    color: #37f037;
+                }
+                .disconnected {
+                    color: #ff3737;
                 }
                 .device-list {
                     list-style-type: none;
@@ -119,21 +365,31 @@ class WebSockerServer {
                     background-color: #3b3b3b;
                     border-radius: 4px;
                 }
-                .connected {
-                    color: #37f037;
-                }
-                .disconnected {
-                    color: #ff3737;
-                }
-                .script-list {
+                .sub-list {
                     list-style-type: none;
                     padding-left: 20px;
                 }
             </style>
         </head>
         <body>
-            <h1>Connected Devices</h1>
-            <ul id="device-list" class="device-list"></ul>
+            <section>
+                <h1>Connected Devices</h1>
+                <ul id="device-list" class="device-list"></ul>
+            </section>
+                
+            <section class="section2">
+                <h2>Brain Stages</h2>
+                <table id="brain-stages-table" border="1">
+                    <thead>
+                        <tr>
+                            <th>Stage</th>
+                            <th>Started</th>
+                            <th>Finished</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </section>
 
             <script>
                 const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -146,92 +402,75 @@ class WebSockerServer {
 
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
+
+                    // Update connected devices
                     const deviceList = document.getElementById('device-list');
                     deviceList.innerHTML = '';
-            
-                    // Handle DancePad
-                    const dancePadConnected = data['DancePad'];
-                    const dancePadLi = document.createElement('li');
-                    dancePadLi.textContent = `DancePad: ${dancePadConnected ? 'Connected' : 'Disconnected'}`;
-                    dancePadLi.className = dancePadConnected ? 'connected' : 'disconnected';
-                    deviceList.appendChild(dancePadLi);
 
-                    // Handle Windows separately
-                    const windowsConnected = data['Windows'];
-                    const windowsLi = document.createElement('li');
-                    windowsLi.textContent = `Windows: ${windowsConnected ? 'Connected' : 'Disconnected'}`;
-                    windowsLi.className = windowsConnected ? 'connected' : 'disconnected';
+                    const appendDevice = (name, isConnected) => {
+                        const li = document.createElement('li');
+                        li.textContent = `${name}: ${isConnected ? 'Connected' : 'Disconnected'}`;
+                        li.className = isConnected ? 'connected' : 'disconnected';
+                        deviceList.appendChild(li);
+                        return li;
+                    };
 
-                    // Create a sublist for scripts under Windows
+                    // Add iPhone and its Spheros
+                    const iPhoneLi = appendDevice('iPhone', data['iPhone']);
+                    if (data['Spheros'] && Array.isArray(data['Spheros']) && data['Spheros'].length > 0) {
+                        const spheroList = document.createElement('ul');
+                        spheroList.className = 'sub-list';
+
+                        for (const spheroName of data['Spheros']) {
+                            const spheroItem = document.createElement('li');
+                            spheroItem.textContent = `Sphero: ${spheroName}`;
+                            spheroItem.className = 'connected';
+                            spheroList.appendChild(spheroItem);
+                        }
+
+                        iPhoneLi.appendChild(spheroList);
+                    }
+
+                    // Add other devices
+                    appendDevice('RPi', data['RPi']);
+                    appendDevice('Windows', data['Windows']);
+                    appendDevice('DancePad', data['DancePad']);
+                    appendDevice('DopamineESP', data['DopamineESP']);
+                    appendDevice('ControllerESP', data['ControllerESP']);
+                    appendDevice('RfidESP', data['RfidESP']);
+                    appendDevice('BuzzersESP', data['BuzzersESP']);
+
+                    // Add scripts under Windows
+                    const windowsLi = appendDevice('Windows', data['Windows']);
                     const scriptList = document.createElement('ul');
-                    scriptList.className = 'script-list';
+                    scriptList.className = 'sub-list';
 
-                    // Script cursor_control
                     const cursorControlConnected = data['Script cursor_control'];
                     const cursorLi = document.createElement('li');
                     cursorLi.textContent = `Script cursor_control: ${cursorControlConnected ? 'Connected' : 'Disconnected'}`;
                     cursorLi.className = cursorControlConnected ? 'connected' : 'disconnected';
                     scriptList.appendChild(cursorLi);
 
-                    // Script screen_capture
                     const screenCaptureConnected = data['Script screen_capture'];
                     const screenLi = document.createElement('li');
                     screenLi.textContent = `Script screen_capture: ${screenCaptureConnected ? 'Connected' : 'Disconnected'}`;
                     screenLi.className = screenCaptureConnected ? 'connected' : 'disconnected';
                     scriptList.appendChild(screenLi);
 
-                    // Append the script list under Windows
                     windowsLi.appendChild(scriptList);
-                    deviceList.appendChild(windowsLi);
 
-                    // Handle iPhone
-                    const iPhoneConnected = data['iPhone'];
-                    const iPhoneLi = document.createElement('li');
-                    iPhoneLi.textContent = `iPhone: ${iPhoneConnected ? 'Connected' : 'Disconnected'}`;
-                    iPhoneLi.className = iPhoneConnected ? 'connected' : 'disconnected';
+                    // Update brain stages
+                    const brainStagesTable = document.getElementById('brain-stages-table').getElementsByTagName('tbody')[0];
+                    brainStagesTable.innerHTML = ''; // Clear previous rows
 
-                    // Add Spheros under iPhone
-                    const spheroList = document.createElement('ul');
-                    spheroList.className = 'script-list'; // Use a class for nested lists
-                    const spheros = data['Spheros'];
-                    if (spheros && spheros.length > 0) {
-                        for (const spheroName of spheros) {
-                            const spheroItem = document.createElement('li');
-                            spheroItem.textContent = spheroName;
-                            spheroItem.className = 'connected';
-                            spheroList.appendChild(spheroItem);
+                    if (data['brainStages']) {
+                        for (const [stageName, stageData] of Object.entries(data['brainStages'])) {
+                            const row = brainStagesTable.insertRow();
+                            row.insertCell(0).textContent = stageName;
+                            row.insertCell(1).textContent = stageData.started ? 'Yes' : 'No';
+                            row.insertCell(2).textContent = stageData.finished ? 'Yes' : 'No';
                         }
-                        iPhoneLi.appendChild(spheroList);
                     }
-                    deviceList.appendChild(iPhoneLi);
-
-                    // Handle RPi
-                    const rpiConnected = data['RPi'];
-                    const rpiLi = document.createElement('li');
-                    rpiLi.textContent = `RPi: ${rpiConnected ? 'Connected' : 'Disconnected'}`;
-                    rpiLi.className = rpiConnected ? 'connected' : 'disconnected';
-                    deviceList.appendChild(rpiLi);
-
-                    // Handle DopamineESP
-                    const dopamineConnected = data['DopamineESP'];
-                    const dopamineLi = document.createElement('li');
-                    dopamineLi.textContent = `DopamineESP: ${dopamineConnected ? 'Connected' : 'Disconnected'}`;
-                    dopamineLi.className = dopamineConnected ? 'connected' : 'disconnected';
-                    deviceList.appendChild(dopamineLi);
-
-                    // Handle ControllerESP
-                    const controllerESPConnected = data['ControllerESP'];
-                    const controllerESPLi = document.createElement('li');
-                    controllerESPLi.textContent = `ControllerESP: ${controllerESPConnected ? 'Connected' : 'Disconnected'}`;
-                    controllerESPLi.className = controllerESPConnected ? 'connected' : 'disconnected';
-                    deviceList.appendChild(controllerESPLi);
-        
-                    // Handle RfidESP
-                    const rfidEspConnected = data['RfidESP'];
-                    const rfidEspLi = document.createElement('li');
-                    rfidEspLi.textContent = `RFID ESP: ${rfidEspConnected ? 'Connected' : 'Disconnected'}`;
-                    rfidEspLi.className = rfidEspConnected ? 'connected' : 'disconnected';
-                    deviceList.appendChild(rfidEspLi);
                 };
 
                 ws.onclose = () => {
@@ -259,6 +498,7 @@ class WebSockerServer {
             connected: { session in
                 print("Client connected to /status")
                 self.statusSessions.append(session)
+                self.sendStatusUpdate()
             },
             disconnected: { session in
                 print("Client disconnected from /status")
@@ -299,6 +539,11 @@ class WebSockerServer {
                     if let data = receivedText.data(using: .utf8),
                        let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                        let messageType = messageDict["type"] as? String {
+                        
+                        if messageType == "calcSolution" {
+                            // Aucune data reçue, on fait tout côté serveur
+                            self.checkSolution()
+                        }
 
                         if messageType == "joystick",
                            let x = messageDict["x"] as? Int,
@@ -360,78 +605,113 @@ class WebSockerServer {
                 }
             ))
 
-            // Route controllerEsp
-            setupWithRoutesInfos(routeInfos: RouteInfos(
-                routeName: "controllerEsp",
-                textCode: { session, receivedText in
-                    print("ControllerESP a envoyé : \(receivedText)")
+        // Route controllerEsp
+        setupWithRoutesInfos(routeInfos: RouteInfos(
+            routeName: "controllerEsp",
+            textCode: { session, receivedText in
+                print("ControllerESP a envoyé : \(receivedText)")
 
-                    // Parse le JSON reçu
-                    if let data = receivedText.data(using: .utf8),
-                       let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-                       let x = messageDict["x"] as? Int,
-                       let y = messageDict["y"] as? Int {
+                // Parse le JSON reçu
+                if let data = receivedText.data(using: .utf8),
+                   let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
 
-                        // Mise à jour de l'état du joystick
-                        self.joystickState["x"] = x
-                        self.joystickState["y"] = y
+                    // Gestion des commandes pour les étapes du cerveau
+                    if let stage = messageDict["stage"] as? String,
+                       let action = messageDict["action"] as? String {
 
-                        // Envoi de l'état mis à jour au client iPhone
-                        self.sendJoystickStateToIphone()
-                    }
-                },
-                dataCode: { session, receivedData in
-                    print("ControllerESP a envoyé des données binaires sur controllerEsp")
-                },
-                connectedCode: { session in
-                    let clientSession = ClientSession(session: session)
-                    self.controllerEspClient = clientSession
-                    self.connectedDevices["ControllerESP"] = true
-                    self.sendStatusUpdate()
-                    print("ControllerESP connecté")
-                },
-                disconnectedCode: { session in
-                    if self.controllerEspClient?.session === session {
-                        self.controllerEspClient = nil
-                        self.connectedDevices["ControllerESP"] = false
-                        self.sendStatusUpdate()
-                        print("ControllerESP déconnecté")
+                        // Valider si l'étape existe
+                        if let brainStage = self.brainStages[stage] {
+                            switch action {
+                            case "start":
+                                self.brainStages[stage]?.started = true
+                                self.brainStages[stage]?.finished = false
+                                print("\(stage) commencée")
+                            case "finish":
+                                self.brainStages[stage]?.started = false
+                                self.brainStages[stage]?.finished = true
+                                print("\(stage) terminée")
+                            default:
+                                print("Action inconnue pour l'étape \(stage)")
+                            }
+                            self.sendStatusUpdate()
+                        } else {
+                            print("Étape \(stage) inconnue")
+                        }
                     }
                 }
-            ))
+            },
+            dataCode: { session, receivedData in
+                print("ControllerESP a envoyé des données binaires sur controllerEsp")
+            },
+            connectedCode: { session in
+                let clientSession = ClientSession(session: session)
+                self.controllerEspClient = clientSession
+                self.connectedDevices["ControllerESP"] = true
+                self.sendStatusUpdate()
+                print("ControllerESP connecté")
+            },
+            disconnectedCode: { session in
+                if self.controllerEspClient?.session === session {
+                    self.controllerEspClient = nil
+                    self.connectedDevices["ControllerESP"] = false
+                    self.sendStatusUpdate()
+                    print("ControllerESP déconnecté")
+                }
+            }
+        ))
+        setupWithRoutesInfos(routeInfos: RouteInfos(
+            routeName: "buzzersEsp",
+            textCode: { session, receivedText in
+                print("buzzersEsp a envoyé : \(receivedText)")
+
+                // Exemple de JSON: {"buzzersPressed":2,"buzzersTotal":2}
+                if let data = receivedText.data(using: .utf8),
+                   let dict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let pressed = dict["buzzersPressed"] as? Int,
+                   let total = dict["buzzersTotal"] as? Int {
+
+                    self.sendBuzzersStateToIphone(pressed: pressed, total: total)
+                }
+            },
+            dataCode: { session, binary in },
+            connectedCode: { session in
+                let clientSession = ClientSession(session: session)
+                self.buzzersEspClient = clientSession
+                print("buzzersEsp connecté")
+            },
+            disconnectedCode: { session in
+                if self.buzzersEspClient?.session === session {
+                    self.buzzersEspClient = nil
+                    print("buzzersEsp déconnecté")
+                }
+            }
+        ))
+
+        // 2) Route rfidEsp : reçoit l’ID de badge
         setupWithRoutesInfos(routeInfos: RouteInfos(
             routeName: "rfidEsp",
             textCode: { session, receivedText in
                 print("rfidEsp a envoyé : \(receivedText)")
-                
-                // On parse le JSON reçu pour récupérer l'ID du badge
+
+                // JSON: {"card_id":12345}
                 if let data = receivedText.data(using: .utf8),
-                   let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-                   let cardId = messageDict["card_id"] as? Int {
-                    
-                    // Print dans la console du serveur l'ID du badge
-                    print("Badge rfidEsp ID: \(cardId)")
-                    
-                    // Ici, tu peux transmettre l'info à d'autres routes si nécessaire
-                    // ex: if let iphoneSession = self.iPhoneClient?.session { ... }
+                   let dict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let cardId = dict["card_id"] as? Int {
+
+                    // Envoyer vers l'iPhone
+                    self.sendRfidDataToIphone(cardId: cardId)
                 }
             },
-            dataCode: { session, receivedData in
-                print("rfidEsp a envoyé des données binaires (\(receivedData.count) bytes).")
-            },
+            dataCode: { session, binary in },
             connectedCode: { session in
                 let clientSession = ClientSession(session: session)
                 self.rfidEspClient = clientSession
-                self.connectedDevices["RfidESP"] = true
-                self.sendStatusUpdate()
-                print("rfidEsp connecté.")
+                print("rfidEsp connecté")
             },
             disconnectedCode: { session in
                 if self.rfidEspClient?.session === session {
                     self.rfidEspClient = nil
-                    self.connectedDevices["RfidESP"] = false
-                    self.sendStatusUpdate()
-                    print("rfidEsp déconnecté.")
+                    print("rfidEsp déconnecté")
                 }
             }
         ))
@@ -509,21 +789,24 @@ class WebSockerServer {
         } else {
             connectedDevices["DopamineESP"] = false
         }
-
-        // Continuez à ping les autres clients (iPhone, RPi, etc.) comme déjà implémenté
-        // ...
     }
     
     func sendStatusUpdate() {
         do {
-            let jsonData = try JSONSerialization.data(withJSONObject: connectedDevices, options: [])
+            var dataToSend = connectedDevices
+            dataToSend["brainStages"] = brainStages.mapValues { [
+                "started": $0.started,
+                "finished": $0.finished
+            ]}
+            
+            let jsonData = try JSONSerialization.data(withJSONObject: dataToSend, options: [])
             if let jsonString = String(data: jsonData, encoding: .utf8) {
                 for session in statusSessions {
                     session.writeText(jsonString)
                 }
             }
         } catch {
-            print("Error serializing connectedDevices to JSON: \(error)")
+            print("Error serializing status data to JSON: \(error)")
         }
     }
     

@@ -390,13 +390,13 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
         // Traiter les données reçues de l'ESP32
         print("DancePad a envoyé : \(receivedText)")
 
-        // Parse the received text into a dictionary
+        // Parse le JSON {"button":1,"state":"pressed"} ou {"button":3,"state":"released"}, etc.
         if let data = receivedText.data(using: .utf8),
            let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
            let buttonNumberValue = messageDict["button"],
            let state = messageDict["state"] as? String {
 
-            // Convertir buttonNumber en Int
+            // Convertir le buttonNumber en Int
             var buttonNumber: Int?
             if let number = buttonNumberValue as? NSNumber {
                 buttonNumber = number.intValue
@@ -405,7 +405,7 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
             }
 
             if let buttonNumber = buttonNumber {
-                // Map button numbers to actions
+                // Correspondance entre numéro de bouton (1..4) et commande RPi
                 let actionMap = [
                     1: "forward",
                     2: "backward",
@@ -416,23 +416,46 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
                 if let action = actionMap[buttonNumber] {
                     let isPressed = (state == "pressed")
 
-                    // Create the message to send to the RPi
+                    // 1) --- Code EXISTANT (pour le RPi) ---
                     let messageToSend: [String: Any] = [
                         "action": action,
                         "isPressed": isPressed
                     ]
-
-                    // Convert the message to JSON string
                     if let jsonData = try? JSONSerialization.data(withJSONObject: messageToSend, options: []),
                        let jsonString = String(data: jsonData, encoding: .utf8) {
 
-                        // Send the message to the RPi
                         if let rpiSession = serverWS.rpiClient?.session {
                             rpiSession.writeText(jsonString)
                             print("Message envoyé au Raspberry Pi : \(jsonString)")
                         } else {
                             print("Raspberry Pi n'est pas connecté")
                         }
+                    }
+
+                    // 2) --- Ajout pour l'iPhone ---
+                    if isPressed {
+                        // Si aucun bouton n'est actif, définir ce bouton comme actif
+                        if serverWS.activeDancePadButton == nil {
+                            serverWS.activeDancePadButton = buttonNumber
+                            print("DancePad bouton \(buttonNumber) pressé et défini comme actif")
+                            serverWS.sendDancePadStateToIphone()
+                        }
+                        // Sinon, ignorer les autres presses
+                    } else {
+                        // Si le bouton relâché est le bouton actif, le désactiver
+                        if serverWS.activeDancePadButton == buttonNumber {
+                            serverWS.activeDancePadButton = nil
+                            print("DancePad bouton \(buttonNumber) relâché et désactivé")
+
+                            // Rechercher le prochain bouton pressé (si existant)
+                            if let nextPressedButton = (1...4).first(where: { serverWS.dancePadButtons[$0] ?? false }) {
+                                serverWS.activeDancePadButton = nextPressedButton
+                                print("DancePad bouton \(nextPressedButton) défini comme actif")
+                            }
+
+                            serverWS.sendDancePadStateToIphone()
+                        }
+                        // Sinon, ignorer
                     }
                 } else {
                     print("Bouton inconnu : \(buttonNumber)")
@@ -445,7 +468,7 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
         }
     },
     dataCode: { session, receivedData in
-        print("DancePad a envoyé des données binaires")
+        print("DancePad a envoyé des données binaires (\(receivedData.count) bytes).")
     },
     connectedCode: { session in
         let clientSession = ClientSession(session: session)
