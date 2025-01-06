@@ -269,7 +269,7 @@ class WebSockerServer {
                 iphoneSession.writeText(jsonString)
                 print("DancePad state sent to iPhone: \(jsonString)")
             } else {
-                print("iPhone pas connecté ou erreur JSON")
+                print("DancePad state envoyé à l'iPhone: aucun bouton actif")
             }
         } else {
             // Aucun bouton actif, envoyer un état vide ou spécifique
@@ -328,10 +328,10 @@ class WebSockerServer {
                 }
                 section {
                     padding: 20px;
-                    width: 75%;
+                    width: 65%;
                 }
                 .section2 {
-                    width: 25%;
+                    width: 35%;
                 }
                 h1, h2 {
                     color: #37f037;
@@ -369,6 +369,18 @@ class WebSockerServer {
                     list-style-type: none;
                     padding-left: 20px;
                 }
+                button {
+                    margin-right: 5px;
+                    padding: 5px 10px;
+                    border: none;
+                    border-radius: 3px;
+                    cursor: pointer;
+                    background-color: #555;
+                    color: white;
+                }
+                button:hover {
+                    background-color: #777;
+                }
             </style>
         </head>
         <body>
@@ -385,6 +397,7 @@ class WebSockerServer {
                             <th>Stage</th>
                             <th>Started</th>
                             <th>Finished</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -469,6 +482,30 @@ class WebSockerServer {
                             row.insertCell(0).textContent = stageName;
                             row.insertCell(1).textContent = stageData.started ? 'Yes' : 'No';
                             row.insertCell(2).textContent = stageData.finished ? 'Yes' : 'No';
+
+                            // Add action buttons: Start, Finish, Reset Started, Reset Finished
+                            const actionsCell = row.insertCell(3);
+                            
+                            const startBtn = document.createElement('button');
+                            startBtn.textContent = 'Start';
+                            startBtn.onclick = () => updateBrainStage(stageName, 'start');
+
+                            const finishBtn = document.createElement('button');
+                            finishBtn.textContent = 'Finish';
+                            finishBtn.onclick = () => updateBrainStage(stageName, 'finish');
+
+                            const resetStartedBtn = document.createElement('button');
+                            resetStartedBtn.textContent = 'Reset Started';
+                            resetStartedBtn.onclick = () => resetBrainStage(stageName, 'started');
+
+                            const resetFinishedBtn = document.createElement('button');
+                            resetFinishedBtn.textContent = 'Reset Finished';
+                            resetFinishedBtn.onclick = () => resetBrainStage(stageName, 'finished');
+
+                            actionsCell.appendChild(startBtn);
+                            actionsCell.appendChild(finishBtn);
+                            actionsCell.appendChild(resetStartedBtn);
+                            actionsCell.appendChild(resetFinishedBtn);
                         }
                     }
                 };
@@ -476,6 +513,26 @@ class WebSockerServer {
                 ws.onclose = () => {
                     console.log('Disconnected from the server');
                 };
+
+                function updateBrainStage(stage, action) {
+                    const msg = {
+                        type: 'updateStage',
+                        stage: stage,
+                        action: action
+                    };
+                    ws.send(JSON.stringify(msg));
+                    console.log(`Sent update command for ${action} of ${stage}`);
+                }
+
+                function resetBrainStage(stage, state) {
+                    const msg = {
+                        type: 'resetStage',
+                        stage: stage,
+                        state: state
+                    };
+                    ws.send(JSON.stringify(msg));
+                    console.log(`Sent reset command for ${state} of ${stage}`);
+                }
             </script>
         </body>
         </html>
@@ -489,11 +546,56 @@ class WebSockerServer {
         // Serve the status updates at /status
         server["/status"] = websocket(
             text: { session, text in
-                // Vous pouvez gérer les messages spécifiques reçus sur /status si nécessaire
-                // Pour l'instant, ce websocket est uniquement utilisé pour envoyer des mises à jour
+                if let data = text.data(using: .utf8),
+                   let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let type = messageDict["type"] as? String {
+                    
+                    if type == "resetStage",
+                       let stage = messageDict["stage"] as? String,
+                       let state = messageDict["state"] as? String {
+                        
+                        if var brainStage = self.brainStages[stage] {
+                            if state == "started" {
+                                brainStage.started = false
+                            } else if state == "finished" {
+                                brainStage.finished = false
+                            }
+                            self.brainStages[stage] = brainStage
+                            self.sendStatusUpdate()
+                            print("\(state.capitalized) state of \(stage) reset to false")
+                        } else {
+                            print("Unknown stage: \(stage)")
+                        }
+                    }
+                    
+                    // Handle updateStage messages
+                    if type == "updateStage",
+                       let stage = messageDict["stage"] as? String,
+                       let action = messageDict["action"] as? String {
+                        
+                        if var brainStage = self.brainStages[stage] {
+                            switch action {
+                            case "start":
+                                brainStage.started = true
+                                brainStage.finished = false
+                                print("Stage \(stage) forcée à commencer")
+                            case "finish":
+                                brainStage.started = false
+                                brainStage.finished = true
+                                print("Stage \(stage) forcée à terminer")
+                            default:
+                                print("Action inconnue pour l'étape \(stage): \(action)")
+                            }
+                            self.brainStages[stage] = brainStage
+                            self.sendStatusUpdate()
+                        } else {
+                            print("Étape \(stage) inconnue pour updateStage")
+                        }
+                    }
+                }
             },
             binary: { session, binary in
-                // Gestion des messages binaires si nécessaire
+                // Handle binary data if necessary
             },
             connected: { session in
                 print("Client connected to /status")
@@ -611,28 +713,48 @@ class WebSockerServer {
             textCode: { session, receivedText in
                 print("ControllerESP a envoyé : \(receivedText)")
 
-                // Parse le JSON reçu
+                // Parse the JSON received
                 if let data = receivedText.data(using: .utf8),
                    let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                    
+                    if let action = messageDict["action"] as? String, action == "selectBrush",
+                       let brush = messageDict["brush"] as? String {
 
-                    // Gestion des commandes pour les étapes du cerveau
-                    if let stage = messageDict["stage"] as? String,
-                       let action = messageDict["action"] as? String {
+                        // Forward the brush selection to the Windows client
+                        let forwardMsg: [String: Any] = [
+                            "type": "brush",
+                            "action": action,
+                            "brush": brush
+                        ]
 
-                        // Valider si l'étape existe
-                        if let brainStage = self.brainStages[stage] {
+                        if let jsonData = try? JSONSerialization.data(withJSONObject: forwardMsg, options: []),
+                           let jsonString = String(data: jsonData, encoding: .utf8) {
+
+                            if let windowsSession = self.windowsClient?.session {
+                                windowsSession.writeText(jsonString)
+                                print("Brush selection forwarded to Windows: \(jsonString)")
+                            } else {
+                                print("No Windows client connected. Brush selection not sent.")
+                            }
+                        }
+                    }
+
+                    // Handle other types of messages (e.g., stage actions)
+                    if let stage = messageDict["stage"] as? String {
+                        if var brainStage = self.brainStages[stage] {
                             switch action {
                             case "start":
-                                self.brainStages[stage]?.started = true
-                                self.brainStages[stage]?.finished = false
+                                brainStage.started = true
+                                brainStage.finished = false
                                 print("\(stage) commencée")
                             case "finish":
-                                self.brainStages[stage]?.started = false
-                                self.brainStages[stage]?.finished = true
+                                brainStage.started = false
+                                brainStage.finished = true
                                 print("\(stage) terminée")
                             default:
                                 print("Action inconnue pour l'étape \(stage)")
                             }
+                            self.brainStages[stage] = brainStage
                             self.sendStatusUpdate()
                         } else {
                             print("Étape \(stage) inconnue")
@@ -659,6 +781,8 @@ class WebSockerServer {
                 }
             }
         ))
+        
+        // Route buzzersEsp
         setupWithRoutesInfos(routeInfos: RouteInfos(
             routeName: "buzzersEsp",
             textCode: { session, receivedText in
@@ -687,7 +811,7 @@ class WebSockerServer {
             }
         ))
 
-        // 2) Route rfidEsp : reçoit l’ID de badge
+        // Route rfidEsp : reçoit l’ID de badge
         setupWithRoutesInfos(routeInfos: RouteInfos(
             routeName: "rfidEsp",
             textCode: { session, receivedText in
@@ -715,6 +839,7 @@ class WebSockerServer {
                 }
             }
         ))
+        
         // Route dopamineConnect
         setupWithRoutesInfos(routeInfos: RouteInfos(
             routeName: "dopamineConnect",
@@ -734,6 +859,7 @@ class WebSockerServer {
                             let dopMsg = ["type": "dopamine", "command": "start"]
                             if let jsonData = try? JSONSerialization.data(withJSONObject: dopMsg, options: []),
                                let jsonString = String(data: jsonData, encoding: .utf8) {
+
                                 iphoneSession.writeText(jsonString)
                                 print("Message dopamine envoyé à l'iPhone")
                             }

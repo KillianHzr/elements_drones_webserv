@@ -12,6 +12,8 @@ var serverWS = WebSockerServer()
 var cmd = TerminalCommandExecutor()
 var cancellable: AnyCancellable? = nil
 
+var calinsNb = 0
+
 // Configuration of routes
 
 // Route rpiConnect
@@ -23,7 +25,36 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
                 serverWS.rpiClient?.lastPongTime = Date()
                 print("Received pong from RPi")
             }
-        } else {
+        }
+        else if let data = receivedText.data(using: .utf8),
+                let jsonDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                let messageType = jsonDict["type"] as? String,
+                messageType == "calins"
+        {
+            // 🆕 Réception d'un nouveau "câlin" depuis le RPi
+            calinsNb += 1
+            print("Nouveau câlin reçu, calinsNb = \(calinsNb)")
+
+            // Envoyer la valeur actuelle de calinsNb à l'iPhone
+            if let iphoneSession = serverWS.iPhoneClient?.session {
+                let msg: [String: Any] = [
+                    "type": "calins",
+                    "calinsNb": calinsNb
+                ]
+                if let jsonData = try? JSONSerialization.data(withJSONObject: msg, options: []),
+                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                    iphoneSession.writeText(jsonString)
+                    print("Message calins envoyé à l'iPhone: \(jsonString)")
+                }
+            }
+
+            // Si on atteint 3 câlins
+            if calinsNb == 3 {
+                print("tous les câlins ont été faits")
+                serverWS.brainStages["Ecstasy"]?.finished = true
+            }
+        }
+        else {
             // Handle other messages
             print("RPI received text message: \(receivedText)")
         }
