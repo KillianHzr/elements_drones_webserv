@@ -103,25 +103,6 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
                     serverWS.sendStatusUpdate()
                     print("Mise à jour des Spheros connectés: \(connectedBolts)")
                 }
-                
-                // Gestion des commandes servo
-                if messageType == "servo",
-                   let action = messageDict["action"] as? String,
-                   action == "start" {
-                    // Préparer le message pour l'ESP32 via la route "dopamineConnect"
-                    let servoMsg = ["action": "servo"]
-                    if let jsonData = try? JSONSerialization.data(withJSONObject: servoMsg, options: []),
-                       let jsonString = String(data: jsonData, encoding: .utf8) {
-                        
-                        // Vérifier si l'ESP32 est connecté via la route "dopamineConnect"
-                        if let espSession = serverWS.dopamineClient?.session {
-                            espSession.writeText(jsonString)
-                            print("Commande servo envoyée à l'ESP32: \(jsonString)")
-                        } else {
-                            print("Erreur: DopamineESP n'est pas connecté.")
-                        }
-                    }
-                }
             }
         }
     },

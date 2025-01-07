@@ -624,88 +624,99 @@ class WebSockerServer {
     
     func configureRoutes() {
         // Route iPhoneConnect
-            setupWithRoutesInfos(routeInfos: RouteInfos(
-                routeName: "iPhoneConnect",
-                textCode: { session, receivedText in
-                    // Traitement des pings
-                    if receivedText == "pong" {
-                        if let client = self.iPhoneClient, client.session === session {
-                            self.iPhoneClient?.lastPongTime = Date()
-                            print("Received pong from iPhone")
-                        }
-                        return
+        setupWithRoutesInfos(routeInfos: RouteInfos(
+            routeName: "iPhoneConnect",
+            textCode: { session, receivedText in
+                // Traitement des pings
+                if receivedText == "pong" {
+                    if let client = self.iPhoneClient, client.session === session {
+                        self.iPhoneClient?.lastPongTime = Date()
+                        print("Received pong from iPhone")
                     }
+                    return
+                }
 
-                    // Traitement des autres messages
-                    print("iPhone received text message: \(receivedText)")
-                    if let data = receivedText.data(using: .utf8),
-                       let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-                       let messageType = messageDict["type"] as? String {
-                        
-                        if messageType == "calcSolution" {
-                            // Aucune data reçue, on fait tout côté serveur
-                            self.checkSolution()
-                        }
+                // Traitement des autres messages
+                print("iPhone received text message: \(receivedText)")
+                if let data = receivedText.data(using: .utf8),
+                   let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let messageType = messageDict["type"] as? String {
 
-                        if messageType == "joystick",
-                           let x = messageDict["x"] as? Int,
+                    switch messageType {
+                    case "calcSolution":
+                        // Aucune data reçue, on fait tout côté serveur
+                        self.checkSolution()
+
+                    case "joystick":
+                        if let x = messageDict["x"] as? Int,
                            let y = messageDict["y"] as? Int {
-
                             // Mise à jour de l'état du joystick
                             self.joystickState["x"] = x
                             self.joystickState["y"] = y
-
                             // Envoi de l'état mis à jour au client iPhone
                             self.sendJoystickStateToIphone()
                         }
 
-                        // Gestion des autres types de messages (spheroStatus, servo, etc.)
-                        if messageType == "spheroStatus",
-                           let connectedBolts = messageDict["connectedBolts"] as? [String] {
+                    case "spheroStatus":
+                        if let connectedBolts = messageDict["connectedBolts"] as? [String] {
                             self.connectedDevices["Spheros"] = connectedBolts
                             self.sendStatusUpdate()
                             print("Mise à jour des Spheros connectés: \(connectedBolts)")
                         }
 
-                        if messageType == "servo",
-                           let action = messageDict["action"] as? String,
-                           action == "start" {
-                            // Envoyer la commande servo à l'ESP32 via dopamineConnect
-                            let servoMsg = ["action": "servo"]
-                            if let jsonData = try? JSONSerialization.data(withJSONObject: servoMsg, options: []),
-                               let jsonString = String(data: jsonData, encoding: .utf8) {
-
-                                if let espSession = self.dopamineClient?.session {
-                                    espSession.writeText(jsonString)
-                                    print("Commande servo envoyée à l'ESP32: \(jsonString)")
-                                } else {
-                                    print("Erreur: DopamineESP n'est pas connecté.")
+                    // AJOUT : Gérer le message "updateStage"
+                    case "updateStage":
+                        if let stage = messageDict["stage"] as? String,
+                           let action = messageDict["action"] as? String {
+                            // Vérifier si l'étape existe dans le dictionnaire brainStages
+                            if var brainStage = self.brainStages[stage] {
+                                switch action {
+                                case "start":
+                                    brainStage.started = true
+                                    brainStage.finished = false
+                                    print("\(stage) lancé (demande iPhone)")
+                                case "finish":
+                                    brainStage.started = false
+                                    brainStage.finished = true
+                                    print("\(stage) terminé (demande iPhone)")
+                                default:
+                                    print("Action inconnue: \(action)")
                                 }
+                                self.brainStages[stage] = brainStage
+                                // Diffuse l'état mis à jour (commencé / terminé) à tous les clients
+                                self.sendStatusUpdate()
+                            } else {
+                                print("Étape \(stage) inconnue pour updateStage (demande iPhone)")
                             }
                         }
-                    }
-                },
-                dataCode: { session, receivedData in
-                    print("iPhone received data message: \(receivedData.count) bytes")
-                },
-                connectedCode: { session in
-                    let clientSession = ClientSession(session: session)
-                    self.iPhoneClient = clientSession
-                    self.connectedDevices["iPhone"] = true
-                    self.connectedDevices["Spheros"] = []
-                    self.sendStatusUpdate()
-                    print("iPhone connecté et session définie")
-                },
-                disconnectedCode: { session in
-                    if self.iPhoneClient?.session === session {
-                        self.iPhoneClient = nil
-                        self.connectedDevices["iPhone"] = false
-                        self.connectedDevices["Spheros"] = []
-                        self.sendStatusUpdate()
-                        print("iPhone déconnecté et session effacée")
+
+                    default:
+                        print("Message iPhone de type \(messageType) non géré.")
                     }
                 }
-            ))
+            },
+            dataCode: { session, receivedData in
+                print("iPhone received data message: \(receivedData.count) bytes")
+            },
+            connectedCode: { session in
+                let clientSession = ClientSession(session: session)
+                self.iPhoneClient = clientSession
+                self.connectedDevices["iPhone"] = true
+                self.connectedDevices["Spheros"] = []
+                self.sendStatusUpdate()
+                print("iPhone connecté et session définie")
+            },
+            disconnectedCode: { session in
+                if self.iPhoneClient?.session === session {
+                    self.iPhoneClient = nil
+                    self.connectedDevices["iPhone"] = false
+                    self.connectedDevices["Spheros"] = []
+                    self.sendStatusUpdate()
+                    print("iPhone déconnecté et session effacée")
+                }
+            }
+        ))
+
 
         // Route controllerEsp
         setupWithRoutesInfos(routeInfos: RouteInfos(
