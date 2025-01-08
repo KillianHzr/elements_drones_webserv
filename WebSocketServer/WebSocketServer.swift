@@ -689,6 +689,72 @@ class WebSockerServer {
                                 print("Étape \(stage) inconnue pour updateStage (demande iPhone)")
                             }
                         }
+                        
+                    case "resetStage":
+                        // On récupère "stage" et "state" (ex: "started" ou "finished")
+                        if let stage = messageDict["stage"] as? String,
+                           let state = messageDict["state"] as? String {
+                            
+                            // Vérifier si l’étape existe
+                            if var brainStage = self.brainStages[stage] {
+                                if state == "started" {
+                                    brainStage.started = false
+                                    print("\(stage) resetStarted (demande iPhone)")
+                                } else if state == "finished" {
+                                    brainStage.finished = false
+                                    print("\(stage) resetFinished (demande iPhone)")
+                                }
+                                // On replace l'objet dans le dictionnaire
+                                self.brainStages[stage] = brainStage
+                                
+                                // Diffuse l’état mis à jour à tous les clients
+                                self.sendStatusUpdate()
+                            } else {
+                                print("Étape \(stage) inconnue pour resetStage (demande iPhone)")
+                            }
+                        }
+                        
+                    case "dessin":
+                        if let action = messageDict["action"] as? String {
+                            print("Message de type 'dessin' reçu avec action : \(action)")
+
+                            // Transmettre le message à l'iPhone (si nécessaire)
+                            if let iphoneSession = self.iPhoneClient?.session {
+                                iphoneSession.writeText(receivedText)
+                                print("Message 'dessin' forwardé à l'iPhone : \(receivedText)")
+                            } else {
+                                print("iPhone non connecté. Message 'dessin' ignoré.")
+                            }
+                        } else {
+                            print("Message 'dessin' reçu sans action.")
+                        }
+                        
+                    case "pinceau":
+                        if let brush = messageDict["brush"] as? String {
+                            print("Message 'selectBrush' reçu avec le pinceau : \(brush)")
+
+                            // Créer un message JSON pour Windows
+                            let forwardMsg: [String: Any] = [
+                                "type": "brush",
+                                "action": "selectBrush",
+                                "brush": brush
+                            ]
+
+                            // Convertir le message en JSON
+                            if let jsonData = try? JSONSerialization.data(withJSONObject: forwardMsg, options: []),
+                               let jsonString = String(data: jsonData, encoding: .utf8) {
+
+                                // Envoyer au client Windows s'il est connecté
+                                if let windowsSession = self.windowsClient?.session {
+                                    windowsSession.writeText(jsonString)
+                                    print("Message 'selectBrush' forwardé au client Windows : \(jsonString)")
+                                } else {
+                                    print("Aucun client Windows connecté. Message 'selectBrush' ignoré.")
+                                }
+                            }
+                        } else {
+                            print("Message 'selectBrush' mal formé ou pinceau non spécifié.")
+                        }
 
                     default:
                         print("Message iPhone de type \(messageType) non géré.")
@@ -726,9 +792,21 @@ class WebSockerServer {
 
                 // Parse the JSON received
                 if let data = receivedText.data(using: .utf8),
-                   let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
-                    
-                    if let action = messageDict["action"] as? String, action == "selectBrush",
+                   let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let action = messageDict["action"] as? String {
+
+                    // Forward "mouseDown" and "mouseUp" actions to the iPhone
+                    if action == "mouseDown" || action == "mouseUp" {
+                        if let iphoneSession = self.iPhoneClient?.session {
+                            iphoneSession.writeText(receivedText)
+                            print("Action \(action) forwardée à l'iPhone.")
+                        } else {
+                            print("iPhone non connecté. Action \(action) ignorée.")
+                        }
+                    }
+
+                    // Handle "selectBrush" action
+                    if action == "selectBrush",
                        let brush = messageDict["brush"] as? String {
 
                         // Forward the brush selection to the Windows client
