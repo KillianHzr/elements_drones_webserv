@@ -111,6 +111,7 @@ class WebSockerServer {
     var controllerEspClient: ClientSession?
     var rfidEspClient: ClientSession?
     var buzzersEspClient: ClientSession?
+    var jaugeEspClient: ClientSession?
     var statusSessions: [WebSocketSession] = []
 
     var connectedDevices: [String: Any] = [
@@ -124,6 +125,7 @@ class WebSockerServer {
         "DopamineESP": false,
         "ControllerESP": false,
         "RfidESP": false,
+        "jaugeEsp": false,
         "BuzzersESP": false
     ]
     
@@ -152,7 +154,7 @@ class WebSockerServer {
         // 2) Vérifier les conditions
         let isGoodSolution = (totalAmusement > 10) && (totalBadTrip <= 0) && (totalMaladie <= 1)
 
-        // 3) Construire le JSON
+        // 3) Construire le JSON pour l'iPhone
         let msg: [String: Any] = [
             "type": "solution",
             "amusement": totalAmusement,
@@ -167,6 +169,55 @@ class WebSockerServer {
            let jsonString = String(data: jsonData, encoding: .utf8) {
             iphoneSession.writeText(jsonString)
             print("Solution sent to iPhone:", jsonString)
+        }
+
+        // 5) Déterminer les couleurs et préparer le message pour jaugeEsp
+        let couleurChargement = "(255, 255, 255)"
+
+        let amusementColor = totalAmusement > 10 ? "(0, 255, 0)" : "(255, 0, 0)"
+        let badTripColor = totalBadTrip <= 0 ? "(0, 255, 0)" : "(255, 0, 0)"
+        let maladieColor = totalMaladie <= 1 ? "(0, 255, 0)" : "(255, 0, 0)"
+
+        let jaugeMsg: [String: Any] = [
+            "couleurChargement": couleurChargement,
+            "amusement": [
+                "couleur": amusementColor,
+                "nombreLeds": totalAmusement
+            ],
+            "badTrip": [
+                "couleur": badTripColor,
+                "nombreLeds": totalBadTrip
+            ],
+            "maladie": [
+                "couleur": maladieColor,
+                "nombreLeds": totalMaladie
+            ]
+        ]
+        
+        if let buzzersSession = self.buzzersEspClient?.session {
+            let confirmMessage: [String: Any] = [
+                "type": "confirmSoluce"
+            ]
+            if let jsonData = try? JSONSerialization.data(withJSONObject: confirmMessage, options: []),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                buzzersSession.writeText(jsonString)
+                print("confirmSoluce message sent to buzzersEsp:", jsonString)
+            }
+        } else {
+            print("buzzersEsp non connecté. Le message confirmSoluce n'a pas été envoyé.")
+        }
+
+        // 6) Envoyer le message à jaugeEsp si connecté
+        if let jaugeSession = self.jaugeEspClient?.session {
+            if let jaugeData = try? JSONSerialization.data(withJSONObject: jaugeMsg, options: []),
+               let jaugeString = String(data: jaugeData, encoding: .utf8) {
+                jaugeSession.writeText(jaugeString)
+                print("Message envoyé à jaugeEsp:", jaugeString)
+            } else {
+                print("Erreur lors de la sérialisation du message pour jaugeEsp.")
+            }
+        } else {
+            print("Client jaugeEsp non connecté. Message non envoyé.")
         }
     }
     
@@ -452,6 +503,7 @@ class WebSockerServer {
                     appendDevice('ControllerESP', data['ControllerESP']);
                     appendDevice('RfidESP', data['RfidESP']);
                     appendDevice('BuzzersESP', data['BuzzersESP']);
+                    appendDevice('jaugeEsp', data['jaugeEsp']);
 
                     // Add scripts under Windows
                     const windowsLi = appendDevice('Windows', data['Windows']);
@@ -795,6 +847,11 @@ class WebSockerServer {
                    let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                    let action = messageDict["action"] as? String {
 
+                    if action == "confirmSoluce" {
+                        print("Action 'confirmSoluce' reçue. Vérification de la solution...")
+                        self.checkSolution()
+                    }
+                    
                     // Forward "mouseDown" and "mouseUp" actions to the iPhone
                     if action == "mouseDown" || action == "mouseUp" {
                         if let iphoneSession = self.iPhoneClient?.session {
@@ -871,6 +928,49 @@ class WebSockerServer {
             }
         ))
         
+        // Route jaugeEsp
+        setupWithRoutesInfos(routeInfos: RouteInfos(
+            routeName: "jaugeEsp",
+            textCode: { session, receivedText in
+                print("jaugeEsp a envoyé : \(receivedText)")
+                
+                // Parse the JSON received
+                if let data = receivedText.data(using: .utf8),
+                   let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let action = messageDict["action"] as? String {
+                    
+                    switch action {
+                    case "allume":
+                        if let color = messageDict["couleur"] as? [Int], color.count == 3 {
+                            print("jaugeEsp : bandeaux allumés avec la couleur \(color)")
+                        }
+                    case "eteint":
+                        print("jaugeEsp : bandeaux éteints")
+                    default:
+                        print("Action inconnue reçue de jaugeEsp : \(action)")
+                    }
+                }
+            },
+            dataCode: { session, receivedData in
+                print("jaugeEsp a envoyé des données binaires")
+            },
+            connectedCode: { session in
+                let clientSession = ClientSession(session: session)
+                self.jaugeEspClient = clientSession
+                self.connectedDevices["jaugeEsp"] = true
+                self.sendStatusUpdate()
+                print("jaugeEsp connecté")
+            },
+            disconnectedCode: { session in
+                if self.jaugeEspClient?.session === session {
+                    self.jaugeEspClient = nil
+                    self.connectedDevices["jaugeEsp"] = false
+                    self.sendStatusUpdate()
+                    print("jaugeEsp déconnecté")
+                }
+            }
+        ))
+        
         // Route buzzersEsp
         setupWithRoutesInfos(routeInfos: RouteInfos(
             routeName: "buzzersEsp",
@@ -890,11 +990,15 @@ class WebSockerServer {
             connectedCode: { session in
                 let clientSession = ClientSession(session: session)
                 self.buzzersEspClient = clientSession
+                self.connectedDevices["BuzzersESP"] = true
+                self.sendStatusUpdate()
                 print("buzzersEsp connecté")
             },
             disconnectedCode: { session in
                 if self.buzzersEspClient?.session === session {
                     self.buzzersEspClient = nil
+                    self.connectedDevices["BuzzersESP   "] = false
+                    self.sendStatusUpdate()
                     print("buzzersEsp déconnecté")
                 }
             }
