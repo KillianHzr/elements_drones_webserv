@@ -877,7 +877,7 @@ class WebSockerServer {
                             print("Joystick state envoyé à l'iPhone depuis ControllerESP : \(jsonString)")
                         } else {
                             print("Erreur : Impossible d'envoyer l'état du joystick à l'iPhone.")
-                        } 
+                        }
                     }
 
                     // Gestion des autres types de messages
@@ -1085,14 +1085,14 @@ class WebSockerServer {
             connectedCode: { session in
                 let clientSession = ClientSession(session: session)
                 self.rfidEspClient = clientSession
-                self.connectedDevices["rfidEsp"] = true
+                self.connectedDevices["RfidESP"] = true
                 self.sendStatusUpdate()
                 print("rfidEsp connecté")
             },
             disconnectedCode: { session in
                 if self.rfidEspClient?.session === session {
                     self.rfidEspClient = nil
-                    self.connectedDevices["rfidEsp"] = false
+                    self.connectedDevices["RfidESP"] = false
                     self.sendStatusUpdate()
                     print("rfidEsp déconnecté")
                 }

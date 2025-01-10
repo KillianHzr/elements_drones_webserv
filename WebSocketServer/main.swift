@@ -52,6 +52,8 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
             if calinsNb == 3 {
                 print("tous les câlins ont été faits")
                 serverWS.brainStages["Ecstasy"]?.finished = true
+                serverWS.brainStages["Ecstasy"]?.started = false
+                serverWS.sendStatusUpdate()
             }
         }
         else {
@@ -427,35 +429,36 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
                 if let action = actionMap[buttonNumber] {
                     let isPressed = (state == "pressed")
 
-                    // 1) --- Code EXISTANT (pour le RPi) ---
-                    let messageToSend: [String: Any] = [
-                        "action": action,
-                        "isPressed": isPressed
-                    ]
-                    if let jsonData = try? JSONSerialization.data(withJSONObject: messageToSend, options: []),
-                       let jsonString = String(data: jsonData, encoding: .utf8) {
+                    // Envoyer les données au RPi uniquement si l'étape "Ecstasy" est en mode "started"
+                    if let ecstasyStage = serverWS.brainStages["Ecstasy"], ecstasyStage.started {
+                        let messageToSend: [String: Any] = [
+                            "action": action,
+                            "isPressed": isPressed
+                        ]
+                        if let jsonData = try? JSONSerialization.data(withJSONObject: messageToSend, options: []),
+                           let jsonString = String(data: jsonData, encoding: .utf8) {
 
-                        if let rpiSession = serverWS.rpiClient?.session {
-                            rpiSession.writeText(jsonString)
-                            print("Message envoyé au Raspberry Pi : \(jsonString)")
-                        } else {
-                            print("Raspberry Pi n'est pas connecté")
+                            if let rpiSession = serverWS.rpiClient?.session {
+                                rpiSession.writeText(jsonString)
+                                print("Message envoyé au Raspberry Pi : \(jsonString)")
+                            } else {
+                                print("Raspberry Pi n'est pas connecté")
+                            }
                         }
+                    } else {
+                        print("L'étape 'Ecstasy' n'est pas en mode 'started'. Données ignorées.")
                     }
 
-                    // 2) --- Ajout pour l'iPhone ---
+                    // Gestion des données pour l'iPhone
                     if isPressed {
-                            serverWS.activeDancePadButton = buttonNumber
-                            print("DancePad bouton \(buttonNumber) pressé et défini comme actif")
-                            serverWS.sendDancePadStateToIphone()
-                        // Sinon, ignorer les autres presses
+                        serverWS.activeDancePadButton = buttonNumber
+                        print("DancePad bouton \(buttonNumber) pressé et défini comme actif")
+                        serverWS.sendDancePadStateToIphone()
                     } else {
-                        // Si le bouton relâché est le bouton actif, le désactiver
                         if serverWS.activeDancePadButton == buttonNumber {
                             serverWS.activeDancePadButton = nil
                             print("DancePad bouton \(buttonNumber) relâché et désactivé")
 
-                            // Rechercher le prochain bouton pressé (si existant)
                             if let nextPressedButton = (1...4).first(where: { serverWS.dancePadButtons[$0] ?? false }) {
                                 serverWS.activeDancePadButton = nextPressedButton
                                 print("DancePad bouton \(nextPressedButton) défini comme actif")
@@ -463,7 +466,6 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
 
                             serverWS.sendDancePadStateToIphone()
                         }
-                        // Sinon, ignorer
                     }
                 } else {
                     print("Bouton inconnu : \(buttonNumber)")
