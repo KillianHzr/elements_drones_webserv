@@ -407,7 +407,6 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
            let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
            let buttonNumberValue = messageDict["button"],
            let state = messageDict["state"] as? String {
-
             // Convertir le buttonNumber en Int
             var buttonNumber: Int?
             if let number = buttonNumberValue as? NSNumber {
@@ -446,12 +445,9 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
 
                     // 2) --- Ajout pour l'iPhone ---
                     if isPressed {
-                        // Si aucun bouton n'est actif, définir ce bouton comme actif
-                        if serverWS.activeDancePadButton == nil {
                             serverWS.activeDancePadButton = buttonNumber
                             print("DancePad bouton \(buttonNumber) pressé et défini comme actif")
                             serverWS.sendDancePadStateToIphone()
-                        }
                         // Sinon, ignorer les autres presses
                     } else {
                         // Si le bouton relâché est le bouton actif, le désactiver

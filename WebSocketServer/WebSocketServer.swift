@@ -146,6 +146,12 @@ class WebSockerServer {
     }
     
     func checkSolution() {
+        
+        guard let champiStage = brainStages["Champi"], champiStage.started else {
+            print("checkSolution() ignorée car l'étape 'Champi' n'est pas en cours.")
+            return
+        }
+        
         // 1) On additionne les amusements
         let totalAmusement = lastBuzzersAmusement + lastRfidAmusement + lastDancePadAmusement
         let totalBadTrip = lastBuzzersBadTrip + lastRfidBadTrip + lastDancePadBadTrip
@@ -300,6 +306,7 @@ class WebSockerServer {
     func sendDancePadStateToIphone() {
         if let activeButton = self.activeDancePadButton,
            let buttonInfo = self.dancePadButtonProperties[activeButton] {
+            print(activeButton)
             self.lastDancePadAmusement = buttonInfo.amusement
             self.lastDancePadBadTrip = buttonInfo.badTrip
             self.lastDancePadMaladieMentale = buttonInfo.maladieMentale
@@ -844,66 +851,121 @@ class WebSockerServer {
 
                 // Parse the JSON received
                 if let data = receivedText.data(using: .utf8),
-                   let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-                   let action = messageDict["action"] as? String {
+                   let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
 
-                    if action == "confirmSoluce" {
-                        print("Action 'confirmSoluce' reçue. Vérification de la solution...")
-                        self.checkSolution()
-                    }
-                    
-                    // Forward "mouseDown" and "mouseUp" actions to the iPhone
-                    if action == "mouseDown" || action == "mouseUp" {
-                        if let iphoneSession = self.iPhoneClient?.session {
-                            iphoneSession.writeText(receivedText)
-                            print("Action \(action) forwardée à l'iPhone.")
-                        } else {
-                            print("iPhone non connecté. Action \(action) ignorée.")
-                        }
-                    }
+                    // Vérifiez si c'est un message de joystick
+                    if let x = messageDict["x"] as? Int,
+                       let y = messageDict["y"] as? Int,
+                       let button = messageDict["button"] as? Int {
 
-                    // Handle "selectBrush" action
-                    if action == "selectBrush",
-                       let brush = messageDict["brush"] as? String {
+                        // Mise à jour de l'état du joystick
+                        self.joystickState["x"] = x
+                        self.joystickState["y"] = y
 
-                        // Forward the brush selection to the Windows client
-                        let forwardMsg: [String: Any] = [
-                            "type": "brush",
-                            "action": action,
-                            "brush": brush
+                        // Créer un message pour l'iPhone
+                        let joystickMsg: [String: Any] = [
+                            "type": "joystick",
+                            "x": x,
+                            "y": y,
+                            "button": button
                         ]
 
-                        if let jsonData = try? JSONSerialization.data(withJSONObject: forwardMsg, options: []),
-                           let jsonString = String(data: jsonData, encoding: .utf8) {
-
-                            if let windowsSession = self.windowsClient?.session {
-                                windowsSession.writeText(jsonString)
-                                print("Brush selection forwarded to Windows: \(jsonString)")
-                            } else {
-                                print("No Windows client connected. Brush selection not sent.")
-                            }
-                        }
+                        if let jsonData = try? JSONSerialization.data(withJSONObject: joystickMsg, options: []),
+                           let jsonString = String(data: jsonData, encoding: .utf8),
+                           let iphoneSession = self.iPhoneClient?.session {
+                            iphoneSession.writeText(jsonString)
+                            print("Joystick state envoyé à l'iPhone depuis ControllerESP : \(jsonString)")
+                        } else {
+                            print("Erreur : Impossible d'envoyer l'état du joystick à l'iPhone.")
+                        } 
                     }
 
-                    // Handle other types of messages (e.g., stage actions)
-                    if let stage = messageDict["stage"] as? String {
-                        if var brainStage = self.brainStages[stage] {
-                            switch action {
-                            case "start":
-                                brainStage.started = true
-                                brainStage.finished = false
-                                print("\(stage) commencée")
-                            case "finish":
-                                brainStage.started = false
-                                brainStage.finished = true
-                                print("\(stage) terminée")
-                            default:
-                                print("Action inconnue pour l'étape \(stage)")
+                    // Gestion des autres types de messages
+                    if let action = messageDict["action"] as? String {
+                        if action == "confirmSoluce" {
+                            print("Action 'confirmSoluce' reçue.")
+                            if let champiStage = self.brainStages["Champi"], champiStage.started {
+                                print("Étape 'Champi' est en mode 'started'. Vérification de la solution...")
+                                self.checkSolution()
                             }
-                            self.brainStages[stage] = brainStage
-                            self.sendStatusUpdate()
-                        } else {
-                            print("Étape \(stage) inconnue")
+                            else if let lsdStage = self.brainStages["LSD"], lsdStage.started {
+                                print("Étape 'LSD' est en mode 'started'. Envoi de 'confirmDrawing' à l'iPhone...")
+
+                                // Préparer le message à envoyer
+                                let confirmDrawingMsg: [String: Any] = [
+                                    "type": "drawing",
+                                    "action": "confirmDrawing"
+                                ]
+
+                                // Convertir le message en JSON
+                                if let jsonData = try? JSONSerialization.data(withJSONObject: confirmDrawingMsg, options: []),
+                                   let jsonString = String(data: jsonData, encoding: .utf8),
+                                   let iphoneSession = self.iPhoneClient?.session {
+                                    // Envoyer le message à l'iPhone
+                                    iphoneSession.writeText(jsonString)
+                                    print("Message 'confirmDrawing' envoyé à l'iPhone : \(jsonString)")
+                                } else {
+                                    print("Erreur : Impossible de créer ou d'envoyer le message 'confirmDrawing'.")
+                                }
+                            }
+                            else {
+                                print("Aucune étape pertinente ('Champi' ou 'LSD') n'est en mode 'started'. Action ignorée.")
+                            }
+                        }
+
+                        // Forward "mouseDown" and "mouseUp" actions to the iPhone
+                        if action == "mouseDown" || action == "mouseUp" {
+                            if let iphoneSession = self.iPhoneClient?.session {
+                                iphoneSession.writeText(receivedText)
+                                print("Action \(action) forwardée à l'iPhone.")
+                            } else {
+                                print("iPhone non connecté. Action \(action) ignorée.")
+                            }
+                        }
+
+                        // Handle "selectBrush" action
+                        if action == "selectBrush",
+                           let brush = messageDict["brush"] as? String {
+
+                            // Forward the brush selection to the Windows client
+                            let forwardMsg: [String: Any] = [
+                                "type": "brush",
+                                "action": action,
+                                "brush": brush
+                            ]
+
+                            if let jsonData = try? JSONSerialization.data(withJSONObject: forwardMsg, options: []),
+                               let jsonString = String(data: jsonData, encoding: .utf8) {
+
+                                if let windowsSession = self.windowsClient?.session {
+                                    windowsSession.writeText(jsonString)
+                                    print("Brush selection forwarded to Windows: \(jsonString)")
+                                } else {
+                                    print("No Windows client connected. Brush selection not sent.")
+                                }
+                            }
+                        }
+
+                        // Handle stage actions
+                        if let stage = messageDict["stage"] as? String {
+                            if var brainStage = self.brainStages[stage] {
+                                switch action {
+                                case "start":
+                                    brainStage.started = true
+                                    brainStage.finished = false
+                                    print("\(stage) commencée")
+                                case "finish":
+                                    brainStage.started = false
+                                    brainStage.finished = true
+                                    print("\(stage) terminée")
+                                default:
+                                    print("Action inconnue pour l'étape \(stage)")
+                                }
+                                self.brainStages[stage] = brainStage
+                                self.sendStatusUpdate()
+                            } else {
+                                print("Étape \(stage) inconnue")
+                            }
                         }
                     }
                 }
@@ -1023,11 +1085,15 @@ class WebSockerServer {
             connectedCode: { session in
                 let clientSession = ClientSession(session: session)
                 self.rfidEspClient = clientSession
+                self.connectedDevices["rfidEsp"] = true
+                self.sendStatusUpdate()
                 print("rfidEsp connecté")
             },
             disconnectedCode: { session in
                 if self.rfidEspClient?.session === session {
                     self.rfidEspClient = nil
+                    self.connectedDevices["rfidEsp"] = false
+                    self.sendStatusUpdate()
                     print("rfidEsp déconnecté")
                 }
             }
