@@ -49,7 +49,7 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
             }
 
             // Si on atteint 3 câlins
-            if calinsNb == 3 {
+            if calinsNb == 1 {
                 print("tous les câlins ont été faits")
                 serverWS.brainStages["Ecstasy"]?.finished = true
                 serverWS.brainStages["Ecstasy"]?.started = false
@@ -192,38 +192,36 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
 serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
     routeName: "videoFeed",
     textCode: { session, receivedText in
-        if let iphoneSession = serverWS.iPhoneClient?.session {
-            iphoneSession.writeText(receivedText)
-            print("Text data transmitted to iPhone via iPhoneSession")
+        // Envoyer le texte reçu à tous les clients connectés à videoFeed
+        for videoSession in serverWS.videoFeedSessions {
+            videoSession.writeText(receivedText)
         }
+        print("Text data transmitted to videoFeed clients")
     },
     dataCode: { session, receivedData in
         print("Received video data from Windows, size: \(receivedData.count) bytes")
-        if let iphoneSession = serverWS.iPhoneClient?.session {
-            let binaryData = [UInt8](receivedData)
-            iphoneSession.writeBinary(binaryData)
-            print("Transmitted video data to iPhone")
-        } else {
-            print("iPhoneSession is nil, cannot transmit video data")
+        // Envoyer les données binaires reçues à tous les clients connectés à videoFeed
+        for videoSession in serverWS.videoFeedSessions {
+            videoSession.writeBinary([UInt8](receivedData))
         }
+        print("Transmitted video data to videoFeed clients")
     },
     connectedCode: { session in
-            let clientSession = ClientSession(session: session)
-            serverWS.screenCaptureClient = clientSession
-            serverWS.connectedDevices["Script screen_capture"] = true
-            serverWS.updateWindowsStatus()
+        // Ajouter la session à la liste des clients videoFeed
+        serverWS.videoFeedSessions.append(session)
+        serverWS.connectedDevices["VideoFeed"] = true
+        serverWS.sendStatusUpdate()
+        print("VideoFeed client connected and session added")
+    },
+    disconnectedCode: { session in
+        // Retirer la session de la liste des clients videoFeed
+        if let index = serverWS.videoFeedSessions.firstIndex(where: { $0 === session }) {
+            serverWS.videoFeedSessions.remove(at: index)
+            serverWS.connectedDevices["VideoFeed"] = false
             serverWS.sendStatusUpdate()
-            print("Script screen_capture connected and session set")
-        },
-        disconnectedCode: { session in
-            if serverWS.screenCaptureClient?.session === session {
-                serverWS.screenCaptureClient = nil
-                serverWS.connectedDevices["Script screen_capture"] = false
-                serverWS.updateWindowsStatus()
-                serverWS.sendStatusUpdate()
-                print("Script screen_capture disconnected and session cleared")
-            }
+            print("VideoFeed client disconnected and session removed")
         }
+    }
 ))
 
 // Route testRobot
@@ -334,14 +332,6 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
     },
     dataCode: { session, receivedData in
         print("sendImage received image data: \(receivedData.count) bytes")
-        // Temporarily save the image
-        let tempImagePath = TmpFileManager.instance.saveImageDataArray(dataImageArray: [receivedData]).first
-        if let imagePath = tempImagePath {
-            // Send the email with the image attachment
-            WebSockerServer.instance.sendEmail(with: imagePath)
-        } else {
-            print("Error: Unable to save the received image.")
-        }
     },
     connectedCode: { session in
         print("sendImage connected")

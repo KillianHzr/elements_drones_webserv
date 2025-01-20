@@ -72,24 +72,25 @@ class OBSWebSocketClient: ObservableObject {
         ]
         sendDictionaryAsJSON(requestPayload)
         
-        if sceneName == "synapse_prise-drogue" {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 38) {
-                self.setScene(sceneName: "synapse_idle_sound_track") { success, message in
-                    if success {
-                        print("[OBS] Successfully switched to synapse_idle_sound_track after delay.")
-                    } else {
-                        print("[OBS] Failed to switch to synapse_idle_sound_track: \(message)")
-                    }
-                }
-            }
-        }
         if sceneName == "ecstasy_prise-drogue" {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 25) {
                 self.setScene(sceneName: "ecstasy_retour-rover") { success, message in
                     if success {
                         print("[OBS] Successfully switched to ecstasy_retour-rover after delay.")
                     } else {
                         print("[OBS] Failed to switch to ecstasy_retour-rover: \(message)")
+                    }
+                }
+            }
+        }
+        
+        if sceneName == "lsd_prise-drogue" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 25) {
+                self.setScene(sceneName: "lsd_retour-windows") { success, message in
+                    if success {
+                        print("[OBS] Successfully switched to lsd_retour-windows after delay.")
+                    } else {
+                        print("[OBS] Failed to switch to lsd_retour-windows: \(message)")
                     }
                 }
             }

@@ -81,11 +81,13 @@ class WebSockerServer {
 
     var badgeProperties: [Int: BadgeInfo] = [
         803109171:   BadgeInfo(titre: "Badge A - Partiels", amusement: -1, badTrip: 3,  maladieMentale: 2),
-        798528483:   BadgeInfo(titre: "Badge B - Perte récente", amusement: -2, badTrip: 4,  maladieMentale: 3),
+        798528483:   BadgeInfo(titre: "Badge B - Montée d'énergie incontrôlée", amusement: 3, badTrip: 3,  maladieMentale: 2),
         802109907:   BadgeInfo(titre: "Badge C - Sérénité intérieur", amusement: 4, badTrip: -2,  maladieMentale: -1),
-        2886461267:  BadgeInfo(titre: "Badge D - Nouvelle promotion", amusement: 4, badTrip: 1,  maladieMentale: 0),
-        2887059987:  BadgeInfo(titre: "Badge E - Montée d'énergie incontrôlée", amusement: 3, badTrip: 3,  maladieMentale: 2)
+        2886461267:  BadgeInfo(titre: "Badge D - Nouvelle promotion", amusement: 4, badTrip: 1,  maladieMentale: 0)
+//        2887059987:  BadgeInfo(titre: "Badge E - Montée d'énergie incontrôlée", amusement: 3, badTrip: 3,  maladieMentale: 2)
     ]
+    
+    var videoFeedSessions: [WebSocketSession] = []
     
     // Dernières valeurs reçues de la qte des buzzers
     var lastBuzzersAmusement: Int = 0
@@ -128,7 +130,8 @@ class WebSockerServer {
         "ControllerESP": false,
         "RfidESP": false,
         "jaugeEsp": false,
-        "BuzzersESP": false
+        "BuzzersESP": false,
+        "VideoFeed": false
     ]
     
     func handleOBSChangeScene(session: WebSocketSession, messageDict: [String: Any]) {
@@ -196,13 +199,13 @@ class WebSockerServer {
         }
         
         // 1) On additionne les amusements
-        let totalAmusement = lastBuzzersAmusement + lastRfidAmusement + lastDancePadAmusement
-        let totalBadTrip = lastBuzzersBadTrip + lastRfidBadTrip + lastDancePadBadTrip
-        let totalMaladie = lastBuzzersMaladieMentale + lastRfidMaladieMentale + lastDancePadMaladieMentale
+//        let totalAmusement = lastBuzzersAmusement + lastRfidAmusement + lastDancePadAmusement
+//        let totalBadTrip = lastBuzzersBadTrip + lastRfidBadTrip + lastDancePadBadTrip
+//        let totalMaladie = lastBuzzersMaladieMentale + lastRfidMaladieMentale + lastDancePadMaladieMentale
         
-//        let totalAmusement = 2
-//        let totalBadTrip = 2
-//        let totalMaladie = 2
+        let totalAmusement = 10
+        let totalBadTrip = 0
+        let totalMaladie = 0
 
         // 2) Vérifier les conditions
         let isGoodSolution = (totalAmusement > 10) && (totalBadTrip <= 0) && (totalMaladie <= 1)
@@ -485,6 +488,92 @@ class WebSockerServer {
     
     func start() {
         // Updated embeddedHTML in WebSocketServer.swift
+        
+        let videoFeedHTML = """
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <title>Flux Vidéo</title>
+                <style>
+                    body { 
+                        background-color: #141414; 
+                        color: white; 
+                        display: flex; 
+                        justify-content: center; 
+                        align-items: center; 
+                        height: 100vh; 
+                        margin: 0;
+                    }
+                    #video-container {
+                        width: 95%;
+                        height: 95%;
+                        border: 2px solid #37f037;
+                        padding: 10px;
+                        background-color: #1e1e1e;
+                        border-radius: 8px;
+                    }
+                    #video {
+                        width: 100%;
+                        height: auto;
+                        display: block;
+                    }
+                    #status {
+                        margin-top: 10px;
+                        text-align: center;
+                        font-size: 1.2em;
+                        color: #37f037;
+                    }
+                </style>
+            </head>
+            <body>
+                <div id="video-container">
+                    <img id="video" src="" alt="Flux Vidéo">
+                    <div id="status">Connexion au flux vidéo...</div>
+                </div>
+                <script>
+                    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+                    const wsHost = window.location.host;
+                    const ws = new WebSocket(`${wsProtocol}://${wsHost}/videoFeed`);
+
+                    ws.binaryType = 'arraybuffer';
+
+                    ws.onopen = () => {
+                        console.log('Connecté au flux vidéo WebSocket');
+                        document.getElementById('status').textContent = 'Connecté au flux vidéo';
+                    };
+
+                    ws.onmessage = (event) => {
+                        if (typeof event.data === 'string') {
+                            // Gérer les données textuelles si nécessaire
+                            console.log('Données textuelles reçues:', event.data);
+                        } else {
+                            // Supposer que les données binaires sont des images JPEG
+                            const blob = new Blob([event.data], { type: 'image/jpeg' });
+                            const url = URL.createObjectURL(blob);
+                            const img = document.getElementById('video');
+                            img.src = url;
+
+                            // Libérer l'URL de l'objet après le chargement de l'image
+                            img.onload = () => {
+                                URL.revokeObjectURL(url);
+                            };
+                        }
+                    };
+
+                    ws.onclose = () => {
+                        console.log('Déconnecté du flux vidéo WebSocket');
+                        document.getElementById('status').textContent = 'Déconnecté du flux vidéo';
+                    };
+
+                    ws.onerror = (error) => {
+                        console.error('Erreur WebSocket:', error);
+                        document.getElementById('status').textContent = 'Erreur de connexion au flux vidéo';
+                    };
+                </script>
+            </body>
+            </html>
+            """
 
         let embeddedHTML = """
         <!DOCTYPE html>
@@ -718,6 +807,10 @@ class WebSockerServer {
         server["/"] = { request in
             return HttpResponse.ok(.html(embeddedHTML))
         }
+        
+        server["/videoFeedPage"] = { request in
+            return HttpResponse.ok(.html(videoFeedHTML))
+        }
 
         // Serve the status updates at /status
         server["/status"] = websocket(
@@ -837,15 +930,15 @@ class WebSockerServer {
                         // Aucune data reçue, on fait tout côté serveur
                         self.checkSolution()
 
-                    case "joystick":
-                        if let x = messageDict["x"] as? Int,
-                           let y = messageDict["y"] as? Int {
-                            // Mise à jour de l'état du joystick
-                            self.joystickState["x"] = x
-                            self.joystickState["y"] = y
-                            // Envoi de l'état mis à jour au client iPhone
-                            self.sendJoystickStateToIphone()
-                        }
+//                    case "joystick":
+//                        if let x = messageDict["x"] as? Int,
+//                           let y = messageDict["y"] as? Int {
+//                            // Mise à jour de l'état du joystick
+//                            self.joystickState["x"] = x
+//                            self.joystickState["y"] = y
+//                            // Envoi de l'état mis à jour au client iPhone
+//                            self.sendJoystickStateToIphone()
+//                        }
 
                     case "spheroStatus":
                         if let connectedBolts = messageDict["connectedBolts"] as? [String] {
@@ -869,6 +962,32 @@ class WebSockerServer {
                                     if stage.lowercased() == "synapse" {
                                         self.sendSendDopamineToBuzzers()
                                         print("Dopamine envoyée à l'esp buzzers")
+                                    }
+                                    
+                                    if stage.lowercased() == "lsd" {
+                                        if !OBSWebSocketClient.instance.isConnectedToOBS {
+                                            OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                                        }
+                                        OBSWebSocketClient.instance.setScene(sceneName: "lsd_prise-drogue") { success, comment in
+                                            if success {
+                                                print("OBS scene changed to 'lsd_prise-drogue' successfully.")
+                                            } else {
+                                                print("Failed to change OBS scene: \(comment)")
+                                            }
+                                        }
+                                    }
+                                    
+                                    if stage.lowercased() == "champi" {
+                                        if !OBSWebSocketClient.instance.isConnectedToOBS {
+                                            OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                                        }
+                                        OBSWebSocketClient.instance.setScene(sceneName: "champi_prise-drogue") { success, comment in
+                                            if success {
+                                                print("OBS scene changed to 'champi_prise-drogue' successfully.")
+                                            } else {
+                                                print("Failed to change OBS scene: \(comment)")
+                                            }
+                                        }
                                     }
                                 case "finish":
                                     brainStage.started = false
@@ -1040,7 +1159,7 @@ class WebSockerServer {
             routeName: "controllerEsp",
             textCode: { session, receivedText in
                 print("ControllerESP a envoyé : \(receivedText)")
-
+                
                 // Parse the JSON received
                 if let data = receivedText.data(using: .utf8),
                    let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
@@ -1161,6 +1280,7 @@ class WebSockerServer {
                         }
                     }
                 }
+                 
             },
             dataCode: { session, receivedData in
                 print("ControllerESP a envoyé des données binaires sur controllerEsp")
@@ -1349,7 +1469,6 @@ class WebSockerServer {
                 }
             }
         ))
-        // Ajoutez ici d'autres routes si nécessaire (par exemple, /cursorData, /sendImage, /controlData, etc.)
     }
     
     func startPingTimer() {
