@@ -1,6 +1,15 @@
 {
-  "originHash" : "64e544250d17cb8c18d6d883c7fde5719d16f55c1c858c8263eb3cdb20cb545f",
+  "originHash" : "78782f8dab1650b04ba54ffe47d7fd2ae94f4d14bf4de4d0116441d9e859843b",
   "pins" : [
+    {
+      "identity" : "nwwebsocket",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/pusher/NWWebSocket",
+      "state" : {
+        "revision" : "1e545fcb53966272fc042aa17ae932f11239e00f",
+        "version" : "0.5.4"
+      }
+    },
     {
       "identity" : "swifter",
       "kind" : "remoteSourceControl",

@@ -10,6 +10,8 @@
 		611C4ADB2CC7C4F300351126 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 611C4ADA2CC7C4F300351126 /* main.swift */; };
 		611C4AE32CC7C5AB00351126 /* Swifter in Frameworks */ = {isa = PBXBuildFile; productRef = 611C4AE22CC7C5AB00351126 /* Swifter */; };
 		611C4B062CC7E7F300351126 /* TerminalCommandExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 611C4B052CC7E7F300351126 /* TerminalCommandExecutor.swift */; };
+		ED1C38FE2D358B71008F1F45 /* NWWebSocket in Frameworks */ = {isa = PBXBuildFile; productRef = ED1C38FD2D358B71008F1F45 /* NWWebSocket */; };
+		ED1C39042D359598008F1F45 /* OBSWebSocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED1C39032D359598008F1F45 /* OBSWebSocketClient.swift */; };
 		EDA13E182CC7EAF0009D54B9 /* WebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDA13E172CC7EAF0009D54B9 /* WebSocketServer.swift */; };
 		EDA13E232CC8FB5A009D54B9 /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDA13E222CC8FB5A009D54B9 /* Utilities.swift */; };
 		EDA13E252CC8FE3F009D54B9 /* TmpFileManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDA13E242CC8FE3F009D54B9 /* TmpFileManager.swift */; };
@@ -31,6 +33,7 @@
 		611C4AD72CC7C4F300351126 /* WebSocketServer */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = WebSocketServer; sourceTree = BUILT_PRODUCTS_DIR; };
 		611C4ADA2CC7C4F300351126 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		611C4B052CC7E7F300351126 /* TerminalCommandExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalCommandExecutor.swift; sourceTree = "<group>"; };
+		ED1C39032D359598008F1F45 /* OBSWebSocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OBSWebSocketClient.swift; sourceTree = "<group>"; };
 		EDA13E172CC7EAF0009D54B9 /* WebSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketServer.swift; sourceTree = "<group>"; };
 		EDA13E222CC8FB5A009D54B9 /* Utilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities.swift; sourceTree = "<group>"; };
 		EDA13E242CC8FE3F009D54B9 /* TmpFileManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmpFileManager.swift; sourceTree = "<group>"; };
@@ -48,6 +51,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				611C4AE32CC7C5AB00351126 /* Swifter in Frameworks */,
+				ED1C38FE2D358B71008F1F45 /* NWWebSocket in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -73,6 +77,7 @@
 		611C4AD92CC7C4F300351126 /* WebSocketServer */ = {
 			isa = PBXGroup;
 			children = (
+				ED1C39032D359598008F1F45 /* OBSWebSocketClient.swift */,
 				ED2FF2332CFF63C600C16930 /* public */,
 				ED1C013E2CFD14A500FA407B /* Save_RPI */,
 				EDA13E1F2CC8F6FD009D54B9 /* Model */,
@@ -108,6 +113,7 @@
 			name = WebSocketServer;
 			packageProductDependencies = (
 				611C4AE22CC7C5AB00351126 /* Swifter */,
+				ED1C38FD2D358B71008F1F45 /* NWWebSocket */,
 			);
 			productName = WebSocketServer;
 			productReference = 611C4AD72CC7C4F300351126 /* WebSocketServer */;
@@ -139,6 +145,7 @@
 			mainGroup = 611C4ACE2CC7C4F200351126;
 			packageReferences = (
 				611C4AE12CC7C5AB00351126 /* XCRemoteSwiftPackageReference "swifter" */,
+				ED1C38FC2D358B71008F1F45 /* XCRemoteSwiftPackageReference "NWWebSocket" */,
 			);
 			productRefGroup = 611C4AD82CC7C4F300351126 /* Products */;
 			projectDirPath = "";
@@ -158,6 +165,7 @@
 				611C4B062CC7E7F300351126 /* TerminalCommandExecutor.swift in Sources */,
 				EDA13E232CC8FB5A009D54B9 /* Utilities.swift in Sources */,
 				611C4ADB2CC7C4F300351126 /* main.swift in Sources */,
+				ED1C39042D359598008F1F45 /* OBSWebSocketClient.swift in Sources */,
 				EDA13E252CC8FE3F009D54B9 /* TmpFileManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -345,6 +353,14 @@
 				minimumVersion = 1.5.0;
 			};
 		};
+		ED1C38FC2D358B71008F1F45 /* XCRemoteSwiftPackageReference "NWWebSocket" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pusher/NWWebSocket";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.5.4;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -352,6 +368,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 611C4AE12CC7C5AB00351126 /* XCRemoteSwiftPackageReference "swifter" */;
 			productName = Swifter;
+		};
+		ED1C38FD2D358B71008F1F45 /* NWWebSocket */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = ED1C38FC2D358B71008F1F45 /* XCRemoteSwiftPackageReference "NWWebSocket" */;
+			productName = NWWebSocket;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

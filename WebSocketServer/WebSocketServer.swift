@@ -102,6 +102,8 @@ class WebSockerServer {
     var lastDancePadBadTrip: Int = 0
     var lastDancePadMaladieMentale: Int = 0
 
+    var hasDispatchedDopamine: Bool = false
+    
     var rpiClient: ClientSession?
     var iPhoneClient: ClientSession?
     var windowsClient: ClientSession?
@@ -128,6 +130,47 @@ class WebSockerServer {
         "jaugeEsp": false,
         "BuzzersESP": false
     ]
+    
+    func handleOBSChangeScene(session: WebSocketSession, messageDict: [String: Any]) {
+        if let action = messageDict["action"] as? String {
+            switch action {
+            case "changeScene":
+                if let sceneName = messageDict["scene"] as? String {
+                    print("Demande de changement de scène OBS en '\(sceneName)'")
+
+                    // Vérifier la connexion à OBS et s'y connecter si nécessaire
+                    if !OBSWebSocketClient.instance.isConnectedToOBS {
+                        OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                    }
+
+                    // Changer la scène dans OBS
+                    OBSWebSocketClient.instance.setScene(sceneName: sceneName) { success, comment in
+                        print("Changement de scène terminé. success=\(success), comment=\(comment)")
+
+                        // Préparer la réponse à envoyer au client WebSocket
+                        let response: [String: Any] = [
+                            "type": "obsResponse",
+                            "scene": sceneName,
+                            "success": success,
+                            "comment": comment
+                        ]
+
+                        // Sérialiser et envoyer la réponse
+                        if let respData = try? JSONSerialization.data(withJSONObject: response, options: []),
+                           let respString = String(data: respData, encoding: .utf8) {
+                            session.writeText(respString)
+                        }
+                    }
+                } else {
+                    print("Erreur : Nom de scène manquant dans le message JSON.")
+                }
+            default:
+                print("Action OBS inconnue : \(action)")
+            }
+        } else {
+            print("Erreur : Action manquante dans le message JSON.")
+        }
+    }
     
     func sendJoystickStateToIphone() {
         let joystickMsg: [String: Any] = [
@@ -156,6 +199,10 @@ class WebSockerServer {
         let totalAmusement = lastBuzzersAmusement + lastRfidAmusement + lastDancePadAmusement
         let totalBadTrip = lastBuzzersBadTrip + lastRfidBadTrip + lastDancePadBadTrip
         let totalMaladie = lastBuzzersMaladieMentale + lastRfidMaladieMentale + lastDancePadMaladieMentale
+        
+//        let totalAmusement = 2
+//        let totalBadTrip = 2
+//        let totalMaladie = 2
 
         // 2) Vérifier les conditions
         let isGoodSolution = (totalAmusement > 10) && (totalBadTrip <= 0) && (totalMaladie <= 1)
@@ -200,6 +247,7 @@ class WebSockerServer {
             ]
         ]
         
+        // 5.1) Envoyer le message "confirmSoluce" à buzzersEsp
         if let buzzersSession = self.buzzersEspClient?.session {
             let confirmMessage: [String: Any] = [
                 "type": "confirmSoluce"
@@ -213,6 +261,34 @@ class WebSockerServer {
             print("buzzersEsp non connecté. Le message confirmSoluce n'a pas été envoyé.")
         }
 
+        // 5.2) Envoyer le message "confirmSoluce" à dancePad
+        if let dancePadSession = self.dancePadClient?.session {
+            let confirmMessage: [String: Any] = [
+                "type": "confirmSoluce"
+            ]
+            if let jsonData = try? JSONSerialization.data(withJSONObject: confirmMessage, options: []),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                dancePadSession.writeText(jsonString)
+                print("confirmSoluce message sent to dancePad:", jsonString)
+            }
+        } else {
+            print("dancePad non connecté. Le message confirmSoluce n'a pas été envoyé.")
+        }
+        
+        // 5.3) Envoyer le message "confirmSoluce" à Rfid
+        if let rfidSession = self.rfidEspClient?.session {
+            let confirmMessage: [String: Any] = [
+                "type": "confirmSoluce"
+            ]
+            if let jsonData = try? JSONSerialization.data(withJSONObject: confirmMessage, options: []),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                rfidSession.writeText(jsonString)
+                print("confirmSoluce message sent to Rfid:", jsonString)
+            }
+        } else {
+            print("Rfid non connecté. Le message confirmSoluce n'a pas été envoyé.")
+        }
+
         // 6) Envoyer le message à jaugeEsp si connecté
         if let jaugeSession = self.jaugeEspClient?.session {
             if let jaugeData = try? JSONSerialization.data(withJSONObject: jaugeMsg, options: []),
@@ -224,6 +300,46 @@ class WebSockerServer {
             }
         } else {
             print("Client jaugeEsp non connecté. Message non envoyé.")
+        }
+    }
+    
+    func sendSendDopamineToBuzzers() {
+        let dopamineMessage: [String: Any] = [
+            "type": "sendDopamine"
+        ]
+        
+        if let buzzersSession = self.buzzersEspClient?.session {
+            do {
+                let jsonData = try JSONSerialization.data(withJSONObject: dopamineMessage, options: [])
+                if let jsonString = String(data: jsonData, encoding: .utf8) {
+                    buzzersSession.writeText(jsonString)
+                    print("Message 'sendDopamine' envoyé à buzzersEsp: \(jsonString)")
+                }
+            } catch {
+                print("Erreur lors de la sérialisation du message '0 ': \(error)")
+            }
+        } else {
+            print("buzzersEsp non connecté. Le message 'sendDopamine' n'a pas été envoyé.")
+        }
+    }
+    
+    func sendFinishDopamineToBuzzers() {
+        let dopamineMessage: [String: Any] = [
+            "type": "finishDopamine"
+        ]
+        
+        if let buzzersSession = self.buzzersEspClient?.session {
+            do {
+                let jsonData = try JSONSerialization.data(withJSONObject: dopamineMessage, options: [])
+                if let jsonString = String(data: jsonData, encoding: .utf8) {
+                    buzzersSession.writeText(jsonString)
+                    print("Message 'finishDopamine' envoyé à buzzersEsp: \(jsonString)")
+                }
+            } catch {
+                print("Erreur lors de la sérialisation du message '0 ': \(error)")
+            }
+        } else {
+            print("buzzersEsp non connecté. Le message 'finishDopamine' n'a pas été envoyé.")
         }
     }
     
@@ -543,6 +659,7 @@ class WebSockerServer {
                             row.insertCell(2).textContent = stageData.finished ? 'Yes' : 'No';
 
                             // Add action buttons: Start, Finish, Reset Started, Reset Finished
+                            // Add action buttons: Start, Finish, Reset Started, Reset Finished
                             const actionsCell = row.insertCell(3);
                             
                             const startBtn = document.createElement('button');
@@ -638,10 +755,20 @@ class WebSockerServer {
                                 brainStage.started = true
                                 brainStage.finished = false
                                 print("Stage \(stage) forcée à commencer")
+                                
+                                if stage.lowercased() == "synapse" {
+                                    self.sendSendDopamineToBuzzers()
+                                    print("Dopamine envoyée à l'esp buzzers")
+                                }
                             case "finish":
                                 brainStage.started = false
                                 brainStage.finished = true
                                 print("Stage \(stage) forcée à terminer")
+                                
+                                if stage.lowercased() == "synapse" {
+                                    self.sendFinishDopamineToBuzzers()
+                                    print("FinishDopamine envoyée à l'esp buzzers")
+                                }
                             default:
                                 print("Action inconnue pour l'étape \(stage): \(action)")
                             }
@@ -705,6 +832,10 @@ class WebSockerServer {
                     case "calcSolution":
                         // Aucune data reçue, on fait tout côté serveur
                         self.checkSolution()
+                        
+                    case "calcSolution":
+                        // Aucune data reçue, on fait tout côté serveur
+                        self.checkSolution()
 
                     case "joystick":
                         if let x = messageDict["x"] as? Int,
@@ -734,10 +865,32 @@ class WebSockerServer {
                                     brainStage.started = true
                                     brainStage.finished = false
                                     print("\(stage) lancé (demande iPhone)")
+                                    
+                                    if stage.lowercased() == "synapse" {
+                                        self.sendSendDopamineToBuzzers()
+                                        print("Dopamine envoyée à l'esp buzzers")
+                                    }
                                 case "finish":
                                     brainStage.started = false
                                     brainStage.finished = true
                                     print("\(stage) terminé (demande iPhone)")
+                                    
+                                    if stage.lowercased() == "synapse" {
+                                        self.sendFinishDopamineToBuzzers()
+                                        print("FinishDopamine envoyée à l'esp buzzers")
+                                        
+                                        let targetScene = "ecstasy_prise-drogue"
+                                        if !OBSWebSocketClient.instance.isConnectedToOBS {
+                                            OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                                        }
+                                        OBSWebSocketClient.instance.setScene(sceneName: targetScene) { success, comment in
+                                            if success {
+                                                print("Scène OBS changée avec succès à '\(targetScene)'.")
+                                            } else {
+                                                print("Échec du changement de scène OBS : \(comment)")
+                                            }
+                                        }
+                                    }
                                 default:
                                     print("Action inconnue: \(action)")
                                 }
@@ -814,6 +967,44 @@ class WebSockerServer {
                         } else {
                             print("Message 'selectBrush' mal formé ou pinceau non spécifié.")
                         }
+                    
+                    case "obs":
+                        // On s'attend à un JSON du genre :
+                        // {
+                        //   "type": "obs",
+                        //   "action": "changeScene",
+                        //   "scene": "NomDeLaScene"
+                        // }
+                        if let action = messageDict["action"] as? String {
+                            switch action {
+                            case "changeScene":
+                                if let sceneName = messageDict["scene"] as? String {
+                                    print("Demande iPhone de changer la scène OBS en '\(sceneName)'")
+                                    if !OBSWebSocketClient.instance.isConnectedToOBS {
+                                        OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                                    }
+                                    // Exemple : appeler un client OBS local
+                                    // (Assurez-vous d’avoir votre client OBSWebSocketClient défini)
+                                    OBSWebSocketClient.instance.setScene(sceneName: sceneName) { success, comment in
+                                        print("Changement de scène terminé. success=\(success), comment=\(comment)")
+                                        
+                                        // Renvoyer éventuellement une réponse à l’iPhone
+                                        let response: [String: Any] = [
+                                            "type": "obsResponse",
+                                            "scene": sceneName,
+                                            "success": success,
+                                            "comment": comment
+                                        ]
+                                        if let respData = try? JSONSerialization.data(withJSONObject: response, options: []),
+                                           let respString = String(data: respData, encoding: .utf8) {
+                                            session.writeText(respString)
+                                        }
+                                    }
+                                }
+                            default:
+                                print("Action OBS inconnue : \(action)")
+                            }
+                        }
 
                     default:
                         print("Message iPhone de type \(messageType) non géré.")
@@ -829,6 +1020,7 @@ class WebSockerServer {
                 self.connectedDevices["iPhone"] = true
                 self.connectedDevices["Spheros"] = []
                 self.sendStatusUpdate()
+                OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
                 print("iPhone connecté et session définie")
             },
             disconnectedCode: { session in
@@ -1121,6 +1313,18 @@ class WebSockerServer {
 
                                 iphoneSession.writeText(jsonString)
                                 print("Message dopamine envoyé à l'iPhone")
+                                
+                                self.sendFinishDopamineToBuzzers()
+                                print("FinishDopamine envoyée à l'esp buzzers")
+                                
+                                if !self.hasDispatchedDopamine {
+                                    self.hasDispatchedDopamine = true
+                                    
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
+                                        self.sendSendDopamineToBuzzers()
+                                        print("Dopamine envoyée à l'esp buzzers")
+                                    }
+                                }
                             }
                         }
                     }
