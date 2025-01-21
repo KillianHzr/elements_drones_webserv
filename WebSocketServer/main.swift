@@ -48,9 +48,12 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
                 }
             }
 
-            // Si on atteint 3 câlins
             if calinsNb == 1 {
                 print("tous les câlins ont été faits")
+                if !OBSWebSocketClient.instance.isConnectedToOBS {
+                    OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                }
+                OBSWebSocketClient.instance.setScene(sceneName: "ecstasy_idle")
                 serverWS.brainStages["Ecstasy"]?.finished = true
                 serverWS.brainStages["Ecstasy"]?.started = false
                 serverWS.sendStatusUpdate()
@@ -399,11 +402,13 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
            let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
            let buttonNumberValue = messageDict["button"],
            let state = messageDict["state"] as? String {
+            
             // Convertir le buttonNumber en Int
             var buttonNumber: Int?
             if let number = buttonNumberValue as? NSNumber {
                 buttonNumber = number.intValue
-            } else if let numberString = buttonNumberValue as? String, let number = Int(numberString) {
+            } else if let numberString = buttonNumberValue as? String,
+                      let number = Int(numberString) {
                 buttonNumber = number
             }
 
@@ -419,7 +424,7 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
                 if let action = actionMap[buttonNumber] {
                     let isPressed = (state == "pressed")
 
-                    // Envoyer les données au RPi uniquement si l'étape "Ecstasy" est en mode "started"
+                    // 1) ENVOYER AU RPi UNIQUEMENT SI L'ÉTAPE "Ecstasy" EST STARTED
                     if let ecstasyStage = serverWS.brainStages["Ecstasy"], ecstasyStage.started {
                         let messageToSend: [String: Any] = [
                             "action": action,
@@ -436,10 +441,10 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
                             }
                         }
                     } else {
-                        print("L'étape 'Ecstasy' n'est pas en mode 'started'. Données ignorées.")
+                        print("L'étape 'Ecstasy' n'est pas en mode 'started'. Données ignorées pour RPi.")
                     }
 
-                    // Gestion des données pour l'iPhone
+                    // 2) GESTION DE L'ÉTAT POUR L'IPHONE
                     if isPressed {
                         serverWS.activeDancePadButton = buttonNumber
                         print("DancePad bouton \(buttonNumber) pressé et défini comme actif")
@@ -449,6 +454,7 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
                             serverWS.activeDancePadButton = nil
                             print("DancePad bouton \(buttonNumber) relâché et désactivé")
 
+                            // Si plusieurs boutons sont maintenus, on détermine un autre "actif"
                             if let nextPressedButton = (1...4).first(where: { serverWS.dancePadButtons[$0] ?? false }) {
                                 serverWS.activeDancePadButton = nextPressedButton
                                 print("DancePad bouton \(nextPressedButton) défini comme actif")
@@ -457,6 +463,39 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
                             serverWS.sendDancePadStateToIphone()
                         }
                     }
+
+                    // 3) **NOUVEAU** : CHANGEMENT DE SCÈNE OBS SI CHAMPI STARTED
+                    if state == "pressed" {  // On ne déclenche qu’au moment d’appuyer
+                        if let champiStage = serverWS.brainStages["Champi"], champiStage.started {
+                            let now = Date()
+                            
+                            // Vérifier si c'est un bouton différent du dernier OU si 10s se sont écoulées
+                            if buttonNumber != serverWS.lastDancePadButtonPressed
+                               || (serverWS.lastDancePadPressTime != nil
+                                   && now.timeIntervalSince(serverWS.lastDancePadPressTime!) > 10) {
+
+                                // Mémoriser ce nouveau bouton et l'heure
+                                serverWS.lastDancePadButtonPressed = buttonNumber
+                                serverWS.lastDancePadPressTime = now
+
+                                // Trouver la scène associée
+                                if let sceneName = serverWS.dancePadToObsSceneMap[buttonNumber] {
+                                    // Se connecter à OBS si pas déjà connecté
+                                    if !OBSWebSocketClient.instance.isConnectedToOBS {
+                                        OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                                    }
+                                    // Changer la scène OBS
+                                    serverWS.setObsScene(sceneName: sceneName)
+                                }
+                            } else {
+                                print("Pas de changement de scène OBS : même bouton pressé < 10s.")
+                            }
+                        } else {
+                            print("L'étape 'Champi' n'est pas en mode 'started'. Pas de changement de scène.")
+                        }
+                    }
+                    // FIN de la section NOUVELLE
+
                 } else {
                     print("Bouton inconnu : \(buttonNumber)")
                 }
@@ -486,6 +525,7 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
         }
     }
 ))
+
 
 // Route dopamineConnect
 serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(

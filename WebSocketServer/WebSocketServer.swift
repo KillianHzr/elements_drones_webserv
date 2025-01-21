@@ -87,6 +87,25 @@ class WebSockerServer {
 //        2887059987:  BadgeInfo(titre: "Badge E - Montée d'énergie incontrôlée", amusement: 3, badTrip: 3,  maladieMentale: 2)
     ]
     
+    var rfidToObsSceneMap: [Int: String] = [
+        803109171: "champi_soundtrack-partiels",
+        798528483: "champi_soundtrack-energie",
+        802109907: "champi_soundtrack-serenite",
+        2886461267: "champi_soundtrack-promotion",
+    ]
+    
+    // Variables pour gérer les pressions sur le DancePad
+    var lastDancePadButtonPressed: Int? = nil
+    var lastDancePadPressTime: Date? = nil
+
+    // Mapping des boutons DancePad vers les scènes OBS
+    var dancePadToObsSceneMap: [Int: String] = [
+        1: "champi_soundtrack-nature",
+        2: "champi_soundtrack-party",
+        3: "champi_soundtrack-festival",
+        4: "champi_soundtrack-rue"
+    ]
+    
     var videoFeedSessions: [WebSocketSession] = []
     
     // Dernières valeurs reçues de la qte des buzzers
@@ -404,6 +423,7 @@ class WebSockerServer {
                let iphoneSession = self.iPhoneClient?.session {
                 iphoneSession.writeText(jsonString)
                 print("RFID data (avec propriétés) envoyé à l'iPhone: \(jsonString)")
+                changeObsScene(for: cardId)
             } else {
                 print("iPhone pas connecté, ou erreur JSON")
             }
@@ -421,6 +441,34 @@ class WebSockerServer {
             }
         }
     }
+    
+    func changeObsScene(for cardId: Int) {
+        // Récupérer le nom de la scène à partir du mapping
+        guard let sceneName = rfidToObsSceneMap[cardId] else {
+            print("Aucune scène OBS définie pour cardId: \(cardId)")
+            return
+        }
+        
+        print("Changement de la scène OBS vers '\(sceneName)' pour cardId: \(cardId)")
+        
+        
+        if !OBSWebSocketClient.instance.isConnectedToOBS {
+            OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+        }
+        
+        setObsScene(sceneName: sceneName)
+    }
+
+    func setObsScene(sceneName: String) {
+        OBSWebSocketClient.instance.setScene(sceneName: sceneName) { success, comment in
+            if success {
+                print("Scène OBS changée avec succès vers '\(sceneName)'.")
+            } else {
+                print("Échec du changement de scène OBS: \(comment)")
+            }
+        }
+    }
+
     
     func sendDancePadStateToIphone() {
         if let activeButton = self.activeDancePadButton,
@@ -1201,7 +1249,12 @@ class WebSockerServer {
                             }
                             else if let lsdStage = self.brainStages["LSD"], lsdStage.started {
                                 print("Étape 'LSD' est en mode 'started'. Envoi de 'confirmDrawing' à l'iPhone...")
-
+                                
+                                if !OBSWebSocketClient.instance.isConnectedToOBS {
+                                    OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                                }
+                                OBSWebSocketClient.instance.setScene(sceneName: "lsd_idle")
+                                
                                 // Préparer le message à envoyer
                                 let confirmDrawingMsg: [String: Any] = [
                                     "type": "drawing",
