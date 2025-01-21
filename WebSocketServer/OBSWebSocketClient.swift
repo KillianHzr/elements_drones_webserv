@@ -95,6 +95,18 @@ class OBSWebSocketClient: ObservableObject {
                 }
             }
         }
+        
+        if sceneName == "champi_soundtrack-success" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                self.setScene(sceneName: "the-end") { success, message in
+                    if success {
+                        print("[OBS] Successfully switched to the-end after delay.")
+                    } else {
+                        print("[OBS] Failed to switch to the-end: \(message)")
+                    }
+                }
+            }
+        }
     }
 
     private func sendDictionaryAsJSON(_ dict: [String: Any]) {

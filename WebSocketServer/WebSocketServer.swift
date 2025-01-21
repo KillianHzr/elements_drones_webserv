@@ -97,6 +97,7 @@ class WebSockerServer {
     // Variables pour gérer les pressions sur le DancePad
     var lastDancePadButtonPressed: Int? = nil
     var lastDancePadPressTime: Date? = nil
+    var lastBuzzersPressed: Int = 0
 
     // Mapping des boutons DancePad vers les scènes OBS
     var dancePadToObsSceneMap: [Int: String] = [
@@ -217,14 +218,12 @@ class WebSockerServer {
             return
         }
         
-        // 1) On additionne les amusements
-//        let totalAmusement = lastBuzzersAmusement + lastRfidAmusement + lastDancePadAmusement
-//        let totalBadTrip = lastBuzzersBadTrip + lastRfidBadTrip + lastDancePadBadTrip
-//        let totalMaladie = lastBuzzersMaladieMentale + lastRfidMaladieMentale + lastDancePadMaladieMentale
         
-        let totalAmusement = 10
-        let totalBadTrip = 0
-        let totalMaladie = 0
+        
+        // 1) On additionne les amusements
+        let totalAmusement = lastBuzzersAmusement + lastRfidAmusement + lastDancePadAmusement
+        let totalBadTrip = lastBuzzersBadTrip + lastRfidBadTrip + lastDancePadBadTrip
+        let totalMaladie = lastBuzzersMaladieMentale + lastRfidMaladieMentale + lastDancePadMaladieMentale
 
         // 2) Vérifier les conditions
         let isGoodSolution = (totalAmusement > 10) && (totalBadTrip <= 0) && (totalMaladie <= 1)
@@ -322,6 +321,25 @@ class WebSockerServer {
             }
         } else {
             print("Client jaugeEsp non connecté. Message non envoyé.")
+        }
+        
+        if !OBSWebSocketClient.instance.isConnectedToOBS {
+            OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+        }
+        OBSWebSocketClient.instance.setScene(sceneName: "champi_soundtrack-checksoluce") { success, comment in
+            if success {
+                print("OBS scene changed to 'champi_soundtrack-checksoluce' successfully.")
+            } else {
+                print("Failed to change OBS scene: \(comment)")
+            }
+        }
+        
+        if isGoodSolution {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 7) {
+                serverWS.brainStages["Champi"]?.finished = true
+                serverWS.brainStages["Champi"]?.started = false
+                serverWS.sendStatusUpdate()
+            }
         }
     }
     
@@ -681,7 +699,7 @@ class WebSockerServer {
                     padding-left: 20px;
                 }
                 button {
-                    margin-right: 5px;
+                    margin: 5px;
                     padding: 5px 10px;
                     border: none;
                     border-radius: 3px;
@@ -692,14 +710,36 @@ class WebSockerServer {
                 button:hover {
                     background-color: #777;
                 }
+                label {
+                    display: inline-block;
+                    margin-right: 15px;
+                }
+                input[type="number"] {
+                    width: 60px;
+                }
             </style>
         </head>
         <body>
             <section>
                 <h1>Connected Devices</h1>
                 <ul id="device-list" class="device-list"></ul>
+
+                <!-- Nouveau bloc : 3 inputs + bouton -->
+                <h2>Test checkSoluce</h2>
+                <div>
+                    <label>Amusement: 
+                        <input type="number" id="amusementInput" value="0">
+                    </label>
+                    <label>BadTrip: 
+                        <input type="number" id="badTripInput" value="0">
+                    </label>
+                    <label>Maladie Mentale: 
+                        <input type="number" id="maladieInput" value="0">
+                    </label>
+                    <button id="checkSoluceBtn">Check Soluce</button>
+                </div>
             </section>
-                
+            
             <section class="section2">
                 <h2>Brain Stages</h2>
                 <table id="brain-stages-table" border="1">
@@ -718,7 +758,8 @@ class WebSockerServer {
             <script>
                 const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
                 const wsHost = window.location.host;
-                const ws = new WebSocket(`${wsProtocol}://${wsHost}/status`);
+                // Concaténation classique pour éviter les backticks
+                const ws = new WebSocket(wsProtocol + "://" + wsHost + "/status");
 
                 ws.onopen = () => {
                     console.log('Connected to the server');
@@ -727,19 +768,19 @@ class WebSockerServer {
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
 
-                    // Update connected devices
+                    // --- MÀJ de la liste des devices ---
                     const deviceList = document.getElementById('device-list');
                     deviceList.innerHTML = '';
 
                     const appendDevice = (name, isConnected) => {
                         const li = document.createElement('li');
-                        li.textContent = `${name}: ${isConnected ? 'Connected' : 'Disconnected'}`;
+                        li.textContent = name + ': ' + (isConnected ? 'Connected' : 'Disconnected');
                         li.className = isConnected ? 'connected' : 'disconnected';
                         deviceList.appendChild(li);
                         return li;
                     };
 
-                    // Add iPhone and its Spheros
+                    // iPhone + Spheros
                     const iPhoneLi = appendDevice('iPhone', data['iPhone']);
                     if (data['Spheros'] && Array.isArray(data['Spheros']) && data['Spheros'].length > 0) {
                         const spheroList = document.createElement('ul');
@@ -747,15 +788,14 @@ class WebSockerServer {
 
                         for (const spheroName of data['Spheros']) {
                             const spheroItem = document.createElement('li');
-                            spheroItem.textContent = `Sphero: ${spheroName}`;
+                            spheroItem.textContent = 'Sphero: ' + spheroName;
                             spheroItem.className = 'connected';
                             spheroList.appendChild(spheroItem);
                         }
-
                         iPhoneLi.appendChild(spheroList);
                     }
 
-                    // Add other devices
+                    // Autres devices
                     appendDevice('RPi', data['RPi']);
                     appendDevice('Windows', data['Windows']);
                     appendDevice('DancePad', data['DancePad']);
@@ -765,28 +805,28 @@ class WebSockerServer {
                     appendDevice('BuzzersESP', data['BuzzersESP']);
                     appendDevice('jaugeEsp', data['jaugeEsp']);
 
-                    // Add scripts under Windows
+                    // Scripts sous Windows
                     const windowsLi = appendDevice('Windows', data['Windows']);
                     const scriptList = document.createElement('ul');
                     scriptList.className = 'sub-list';
 
                     const cursorControlConnected = data['Script cursor_control'];
                     const cursorLi = document.createElement('li');
-                    cursorLi.textContent = `Script cursor_control: ${cursorControlConnected ? 'Connected' : 'Disconnected'}`;
+                    cursorLi.textContent = 'Script cursor_control: ' + (cursorControlConnected ? 'Connected' : 'Disconnected');
                     cursorLi.className = cursorControlConnected ? 'connected' : 'disconnected';
                     scriptList.appendChild(cursorLi);
 
                     const screenCaptureConnected = data['Script screen_capture'];
                     const screenLi = document.createElement('li');
-                    screenLi.textContent = `Script screen_capture: ${screenCaptureConnected ? 'Connected' : 'Disconnected'}`;
+                    screenLi.textContent = 'Script screen_capture: ' + (screenCaptureConnected ? 'Connected' : 'Disconnected');
                     screenLi.className = screenCaptureConnected ? 'connected' : 'disconnected';
                     scriptList.appendChild(screenLi);
 
                     windowsLi.appendChild(scriptList);
 
-                    // Update brain stages
+                    // --- MÀJ du tableau Brain Stages ---
                     const brainStagesTable = document.getElementById('brain-stages-table').getElementsByTagName('tbody')[0];
-                    brainStagesTable.innerHTML = ''; // Clear previous rows
+                    brainStagesTable.innerHTML = '';
 
                     if (data['brainStages']) {
                         for (const [stageName, stageData] of Object.entries(data['brainStages'])) {
@@ -795,10 +835,7 @@ class WebSockerServer {
                             row.insertCell(1).textContent = stageData.started ? 'Yes' : 'No';
                             row.insertCell(2).textContent = stageData.finished ? 'Yes' : 'No';
 
-                            // Add action buttons: Start, Finish, Reset Started, Reset Finished
-                            // Add action buttons: Start, Finish, Reset Started, Reset Finished
                             const actionsCell = row.insertCell(3);
-                            
                             const startBtn = document.createElement('button');
                             startBtn.textContent = 'Start';
                             startBtn.onclick = () => updateBrainStage(stageName, 'start');
@@ -827,6 +864,7 @@ class WebSockerServer {
                     console.log('Disconnected from the server');
                 };
 
+                // Envoi de commandes d'update / reset
                 function updateBrainStage(stage, action) {
                     const msg = {
                         type: 'updateStage',
@@ -834,7 +872,7 @@ class WebSockerServer {
                         action: action
                     };
                     ws.send(JSON.stringify(msg));
-                    console.log(`Sent update command for ${action} of ${stage}`);
+                    console.log('Sent update command for ' + action + ' of ' + stage);
                 }
 
                 function resetBrainStage(stage, state) {
@@ -844,8 +882,25 @@ class WebSockerServer {
                         state: state
                     };
                     ws.send(JSON.stringify(msg));
-                    console.log(`Sent reset command for ${state} of ${stage}`);
+                    console.log('Sent reset command for ' + state + ' of ' + stage);
                 }
+
+                // Au clic du bouton "Check Soluce", on envoie nos 3 valeurs
+                document.getElementById('checkSoluceBtn').addEventListener('click', () => {
+                    const amusement = parseInt(document.getElementById('amusementInput').value);
+                    const badTrip = parseInt(document.getElementById('badTripInput').value);
+                    const maladie = parseInt(document.getElementById('maladieInput').value);
+
+                    const msg = {
+                        type: "calcSolution",
+                        amusement: amusement,
+                        badTrip: badTrip,
+                        maladieMentale: maladie
+                    };
+
+                    ws.send(JSON.stringify(msg));
+                    console.log("Envoi du message calcSolution avec ", msg);
+                });
             </script>
         </body>
         </html>
@@ -866,6 +921,20 @@ class WebSockerServer {
                 if let data = text.data(using: .utf8),
                    let messageDict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                    let type = messageDict["type"] as? String {
+                    
+                    if type == "calcSolution" {
+                        let customAmusement = messageDict["amusement"] as? Int ?? 0
+                        let customBadTrip = messageDict["badTrip"] as? Int ?? 0
+                        let customMaladie = messageDict["maladieMentale"] as? Int ?? 0
+                        self.lastBuzzersAmusement = customAmusement
+                        self.lastBuzzersBadTrip   = customBadTrip
+                        self.lastBuzzersMaladieMentale = customMaladie
+
+                        print("Reçu calcSolution => amusement=\(customAmusement), badTrip=\(customBadTrip), maladie=\(customMaladie)")
+                        
+                        self.checkSolution()
+                    }
+                        
                     
                     if type == "resetStage",
                        let stage = messageDict["stage"] as? String,
@@ -1047,6 +1116,23 @@ class WebSockerServer {
                                         print("FinishDopamine envoyée à l'esp buzzers")
                                         
                                         let targetScene = "ecstasy_prise-drogue"
+                                        if !OBSWebSocketClient.instance.isConnectedToOBS {
+                                            OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                                        }
+                                        OBSWebSocketClient.instance.setScene(sceneName: targetScene) { success, comment in
+                                            if success {
+                                                print("Scène OBS changée avec succès à '\(targetScene)'.")
+                                            } else {
+                                                print("Échec du changement de scène OBS : \(comment)")
+                                            }
+                                        }
+                                    }
+                                    
+                                    if stage.lowercased() == "champi" {
+                                        self.sendFinishDopamineToBuzzers()
+                                        print("The End envoyée à l'esp buzzers")
+                                        
+                                        let targetScene = "champi_soundtrack-success"
                                         if !OBSWebSocketClient.instance.isConnectedToOBS {
                                             OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
                                         }
@@ -1268,6 +1354,9 @@ class WebSockerServer {
                                     // Envoyer le message à l'iPhone
                                     iphoneSession.writeText(jsonString)
                                     print("Message 'confirmDrawing' envoyé à l'iPhone : \(jsonString)")
+                                    serverWS.brainStages["LSD"]?.finished = true
+                                    serverWS.brainStages["LSD"]?.started = false
+                                    serverWS.sendStatusUpdate()
                                 } else {
                                     print("Erreur : Impossible de créer ou d'envoyer le message 'confirmDrawing'.")
                                 }
@@ -1284,6 +1373,12 @@ class WebSockerServer {
                                 print("Action \(action) forwardée à l'iPhone.")
                             } else {
                                 print("iPhone non connecté. Action \(action) ignorée.")
+                            }
+                            if let windowsSession = self.windowsClient?.session {
+                                windowsSession.writeText(receivedText)
+                                print("Action \(action) forwardée au Windows.")
+                            } else {
+                                print("Windows non connecté. Action \(action) ignorée.")
                             }
                         }
 
@@ -1409,8 +1504,29 @@ class WebSockerServer {
                    let dict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                    let pressed = dict["buzzersPressed"] as? Int,
                    let total = dict["buzzersTotal"] as? Int {
+                       self.sendBuzzersStateToIphone(pressed: pressed, total: total)
+                       
+                       // Vérifier si le nombre de buzzers pressés a augmenté
+                       if pressed > self.lastBuzzersPressed {
+                           let sceneName = "champi_soundtrack-champi\(pressed)"
+                           
+                           print("Nombre de buzzers pressés a augmenté de \(self.lastBuzzersPressed) à \(pressed). Changement de scène OBS.")
 
-                    self.sendBuzzersStateToIphone(pressed: pressed, total: total)
+                           if !OBSWebSocketClient.instance.isConnectedToOBS {
+                               OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                           }
+                           
+                           OBSWebSocketClient.instance.setScene(sceneName: sceneName) { success, comment in
+                               print("Scene changed to \(sceneName). success=\(success), comment=\(comment)")
+                               
+                               // Vous pouvez ajouter ici la logique pour déclencher le son si nécessaire
+                           }
+                       } else {
+                           print("Nombre de buzzers pressés n'a pas augmenté (Pressed: \(pressed), Last: \(self.lastBuzzersPressed)). Aucun changement de scène OBS.")
+                       }
+
+                       // Toujours mettre à jour lastBuzzersPressed
+                       self.lastBuzzersPressed = pressed
                 }
             },
             dataCode: { session, binary in },

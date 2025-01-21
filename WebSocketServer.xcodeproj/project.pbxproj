@@ -77,11 +77,11 @@
 		611C4AD92CC7C4F300351126 /* WebSocketServer */ = {
 			isa = PBXGroup;
 			children = (
-				ED1C39032D359598008F1F45 /* OBSWebSocketClient.swift */,
 				ED2FF2332CFF63C600C16930 /* public */,
 				ED1C013E2CFD14A500FA407B /* Save_RPI */,
 				EDA13E1F2CC8F6FD009D54B9 /* Model */,
 				611C4ADA2CC7C4F300351126 /* main.swift */,
+				ED1C39032D359598008F1F45 /* OBSWebSocketClient.swift */,
 				611C4B052CC7E7F300351126 /* TerminalCommandExecutor.swift */,
 				EDA13E172CC7EAF0009D54B9 /* WebSocketServer.swift */,
 				EDA13E222CC8FB5A009D54B9 /* Utilities.swift */,

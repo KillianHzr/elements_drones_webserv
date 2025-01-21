@@ -199,15 +199,15 @@ serverWS.setupWithRoutesInfos(routeInfos: RouteInfos(
         for videoSession in serverWS.videoFeedSessions {
             videoSession.writeText(receivedText)
         }
-        print("Text data transmitted to videoFeed clients")
+//        print("Text data transmitted to videoFeed clients")
     },
     dataCode: { session, receivedData in
-        print("Received video data from Windows, size: \(receivedData.count) bytes")
+//        print("Received video data from Windows, size: \(receivedData.count) bytes")
         // Envoyer les données binaires reçues à tous les clients connectés à videoFeed
         for videoSession in serverWS.videoFeedSessions {
             videoSession.writeBinary([UInt8](receivedData))
         }
-        print("Transmitted video data to videoFeed clients")
+//        print("Transmitted video data to videoFeed clients")
     },
     connectedCode: { session in
         // Ajouter la session à la liste des clients videoFeed
