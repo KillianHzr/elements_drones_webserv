@@ -335,10 +335,22 @@ class WebSockerServer {
         }
         
         if isGoodSolution {
+            serverWS.brainStages["Champi"]?.finished = true
+            serverWS.brainStages["Champi"]?.started = false
+            serverWS.sendStatusUpdate()
+            
             DispatchQueue.main.asyncAfter(deadline: .now() + 7) {
-                serverWS.brainStages["Champi"]?.finished = true
-                serverWS.brainStages["Champi"]?.started = false
-                serverWS.sendStatusUpdate()
+                let targetScene = "champi_soundtrack-success"
+                if !OBSWebSocketClient.instance.isConnectedToOBS {
+                    OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                }
+                OBSWebSocketClient.instance.setScene(sceneName: targetScene) { success, comment in
+                    if success {
+                        print("Scène OBS changée avec succès à '\(targetScene)'.")
+                    } else {
+                        print("Échec du changement de scène OBS : \(comment)")
+                    }
+                }
             }
         }
     }
@@ -1081,6 +1093,20 @@ class WebSockerServer {
                                         print("Dopamine envoyée à l'esp buzzers")
                                     }
                                     
+                                    if stage.lowercased() == "ecstasy" {
+                                        let targetScene = "ecstasy_prise-drogue"
+                                        if !OBSWebSocketClient.instance.isConnectedToOBS {
+                                            OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                                        }
+                                        OBSWebSocketClient.instance.setScene(sceneName: targetScene) { success, comment in
+                                            if success {
+                                                print("Scène OBS changée avec succès à '\(targetScene)'.")
+                                            } else {
+                                                print("Échec du changement de scène OBS : \(comment)")
+                                            }
+                                        }
+                                    }
+                                    
                                     if stage.lowercased() == "lsd" {
                                         if !OBSWebSocketClient.instance.isConnectedToOBS {
                                             OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
@@ -1105,6 +1131,18 @@ class WebSockerServer {
                                                 print("Failed to change OBS scene: \(comment)")
                                             }
                                         }
+                                        if let jaugeSession = self.jaugeEspClient?.session {
+                                            let startLedsMessage: [String: Any] = [
+                                                "action": "startLedsChampi"
+                                            ]
+                                            if let jsonData = try? JSONSerialization.data(withJSONObject: startLedsMessage, options: []),
+                                               let jsonString = String(data: jsonData, encoding: .utf8) {
+                                                jaugeSession.writeText(jsonString)
+                                                print("Commande 'startLedsChampi' envoyée à jaugeEsp : \(jsonString)")
+                                            }
+                                        } else {
+                                            print("jaugeEsp non connecté. La commande 'startLedsChampi' n'a pas été envoyée.")
+                                        }
                                     }
                                 case "finish":
                                     brainStage.started = false
@@ -1114,35 +1152,11 @@ class WebSockerServer {
                                     if stage.lowercased() == "synapse" {
                                         self.sendFinishDopamineToBuzzers()
                                         print("FinishDopamine envoyée à l'esp buzzers")
-                                        
-                                        let targetScene = "ecstasy_prise-drogue"
-                                        if !OBSWebSocketClient.instance.isConnectedToOBS {
-                                            OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
-                                        }
-                                        OBSWebSocketClient.instance.setScene(sceneName: targetScene) { success, comment in
-                                            if success {
-                                                print("Scène OBS changée avec succès à '\(targetScene)'.")
-                                            } else {
-                                                print("Échec du changement de scène OBS : \(comment)")
-                                            }
-                                        }
                                     }
                                     
                                     if stage.lowercased() == "champi" {
                                         self.sendFinishDopamineToBuzzers()
                                         print("The End envoyée à l'esp buzzers")
-                                        
-                                        let targetScene = "champi_soundtrack-success"
-                                        if !OBSWebSocketClient.instance.isConnectedToOBS {
-                                            OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
-                                        }
-                                        OBSWebSocketClient.instance.setScene(sceneName: targetScene) { success, comment in
-                                            if success {
-                                                print("Scène OBS changée avec succès à '\(targetScene)'.")
-                                            } else {
-                                                print("Échec du changement de scène OBS : \(comment)")
-                                            }
-                                        }
                                     }
                                 default:
                                     print("Action inconnue: \(action)")
@@ -1198,6 +1212,26 @@ class WebSockerServer {
                         if let brush = messageDict["brush"] as? String {
                             print("Message 'selectBrush' reçu avec le pinceau : \(brush)")
 
+                            let brushNumber = brush.replacingOccurrences(of: "pinceau", with: "")
+                            
+                            // Construire le nom de la scène OBS
+                            let sceneName = "lsd_retour-windows_pinceau\(brushNumber)"
+                            print("Changement de scène OBS pour la scène : \(sceneName)")
+                            
+                            // Vérifier et se connecter à OBS si nécessaire
+                            if !OBSWebSocketClient.instance.isConnectedToOBS {
+                                OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                            }
+                            
+                            // Changer la scène OBS
+                            OBSWebSocketClient.instance.setScene(sceneName: sceneName) { success, comment in
+                                if success {
+                                    print("Scène OBS changée avec succès à '\(sceneName)'.")
+                                } else {
+                                    print("Échec du changement de scène OBS : \(comment)")
+                                }
+                            }
+                            
                             // Créer un message JSON pour Windows
                             let forwardMsg: [String: Any] = [
                                 "type": "brush",
@@ -1381,6 +1415,45 @@ class WebSockerServer {
                                 print("Windows non connecté. Action \(action) ignorée.")
                             }
                         }
+                        
+                        if action == "stopLedsChampi" {
+                            print("Action 'stopLedsChampi' reçue de controllerEsp.")
+                            
+                            if let jaugeSession = self.jaugeEspClient?.session {
+                                let stopLedsMessage: [String: Any] = [
+                                    "action": "stopLedsChampi"
+                                ]
+                                if let jsonData = try? JSONSerialization.data(withJSONObject: stopLedsMessage, options: []),
+                                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                                    jaugeSession.writeText(jsonString)
+                                    print("Commande 'stopLedsChampi' envoyée à jaugeEsp : \(jsonString)")
+                                }
+                            } else {
+                                print("jaugeEsp non connecté. La commande 'stopLedsChampi' n'a pas été envoyée.")
+                            }
+                        }
+                        
+                        if action == "secondDopamine" {
+                            print("Action 'stopLedsChampi' reçue de controllerEsp.")
+                            
+                            if let buzzersSessions = self.buzzersEspClient?.session {
+                                self.sendSendDopamineToBuzzers()
+                            } else {
+                                print("buzzersEsp non connecté. La commande 'secondDopamine' n'a pas été envoyée.")
+                            }
+                            
+                            if let iphoneSession = self.iPhoneClient?.session {
+                                let dopamineMsg: [String: Any] = [
+                                    "type": "dopamine",
+                                    "command": "switchSphero"
+                                ]
+                                if let jsonData = try? JSONSerialization.data(withJSONObject: dopamineMsg, options: []),
+                                   let jsonString = String(data: jsonData, encoding: .utf8) {
+                                    iphoneSession.writeText(jsonString)
+                                    print("Message 'switchSphero' envoyé à l'iPhone : \(jsonString)")
+                                }
+                            }
+                        }
 
                         // Handle "selectBrush" action
                         if action == "selectBrush",
@@ -1518,8 +1591,17 @@ class WebSockerServer {
                            
                            OBSWebSocketClient.instance.setScene(sceneName: sceneName) { success, comment in
                                print("Scene changed to \(sceneName). success=\(success), comment=\(comment)")
-                               
-                               // Vous pouvez ajouter ici la logique pour déclencher le son si nécessaire
+                           }
+                       } else if pressed < self.lastBuzzersPressed {
+                           let sceneName = "champi_prise-drogue"
+                           print("Nombre de buzzers pressés a diminué de \(self.lastBuzzersPressed) à \(pressed). Changement de scène OBS vers '\(sceneName)'.")
+                           
+                           if !OBSWebSocketClient.instance.isConnectedToOBS {
+                               OBSWebSocketClient.instance.connectOBS(ip: "192.168.10.213", port: 4455)
+                           }
+                           
+                           OBSWebSocketClient.instance.setScene(sceneName: sceneName) { success, comment in
+                               print("Scene changed to \(sceneName). success=\(success), comment=\(comment)")
                            }
                        } else {
                            print("Nombre de buzzers pressés n'a pas augmenté (Pressed: \(pressed), Last: \(self.lastBuzzersPressed)). Aucun changement de scène OBS.")
@@ -1608,11 +1690,6 @@ class WebSockerServer {
                                 
                                 if !self.hasDispatchedDopamine {
                                     self.hasDispatchedDopamine = true
-                                    
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
-                                        self.sendSendDopamineToBuzzers()
-                                        print("Dopamine envoyée à l'esp buzzers")
-                                    }
                                 }
                             }
                         }
